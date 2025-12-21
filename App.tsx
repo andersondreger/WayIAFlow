@@ -18,72 +18,53 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const checkUser = async () => {
+    // Monitor de estado de autenticação global
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth Event:", event);
+      
+      if (session) {
+        setIsAuthenticated(true);
+        // Se o evento for de recuperação de senha, o Login.tsx cuidará da view interna
+        if (event === 'PASSWORD_RECOVERY') {
+          setCurrentView(AppView.LOGIN);
+        } else if (currentView === AppView.LANDING || currentView === AppView.LOGIN) {
+          setCurrentView(AppView.DASHBOARD);
+        }
+        await fetchTrialInfo(session.user.id);
+      } else {
+        setIsAuthenticated(false);
+      }
+      setIsLoading(false);
+    });
+
+    const initAuth = async () => {
       try {
-        console.log("Checking session...");
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        
+        const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           setIsAuthenticated(true);
           await fetchTrialInfo(session.user.id);
         }
       } catch (err) {
-        console.error("Auth init error:", err);
+        console.error("Auth Error:", err);
       } finally {
         setIsLoading(false);
       }
     };
+    initAuth();
 
-    checkUser();
-
-    // Fail-safe: Se em 6 segundos ainda estiver carregando, libera a tela
-    const timer = setTimeout(() => {
-      setIsLoading(prev => {
-        if (prev) console.warn("Loading state forced to false by timeout");
-        return false;
-      });
-    }, 6000);
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth event:", event);
-      setIsAuthenticated(!!session);
-      if (session) {
-        await fetchTrialInfo(session.user.id);
-      } else {
-        setTrialDays(15);
-        if (![AppView.LANDING, AppView.LOGIN, AppView.CHECKOUT].includes(currentView)) {
-          setCurrentView(AppView.LANDING);
-        }
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(timer);
-    };
-  }, []);
+    return () => subscription.unsubscribe();
+  }, [currentView]);
 
   const fetchTrialInfo = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('trial_start_date, status')
-        .eq('id', userId)
-        .single();
-
-      if (data && !error) {
+      const { data } = await supabase.from('profiles').select('trial_start_date').eq('id', userId).single();
+      if (data) {
         const start = new Date(data.trial_start_date);
         const now = new Date();
-        const diffTime = Math.abs(now.getTime() - start.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        const remaining = Math.max(0, 15 - diffDays);
-        setTrialDays(remaining);
+        const diffDays = Math.ceil(Math.abs(now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        setTrialDays(Math.max(0, 15 - diffDays));
       }
-    } catch (e) {
-      // Se a tabela não existir ainda ou der erro, mantemos o padrão de 15 dias
-      console.warn("Could not fetch trial info, using default.");
-    }
+    } catch (e) {}
   };
 
   const navigateTo = (view: AppView) => {
@@ -91,12 +72,6 @@ const App: React.FC = () => {
       setCurrentView(AppView.LOGIN);
       return;
     }
-    
-    if (trialDays <= 0 && view === AppView.DASHBOARD && isAuthenticated) {
-      setCurrentView(AppView.CHECKOUT);
-      return;
-    }
-
     setCurrentView(view);
     window.scrollTo(0, 0);
   };
@@ -111,31 +86,22 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center gap-6">
         <div className="w-16 h-16 border-4 border-orange-600 border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(234,88,12,0.2)]"></div>
-        <p className="text-orange-500 font-black text-xs uppercase tracking-[0.3em] animate-pulse">Iniciando Rede Neural...</p>
+        <p className="text-orange-500 font-black text-xs uppercase tracking-[0.3em] animate-pulse">Sincronizando WayFlow iA...</p>
       </div>
     );
   }
 
   const renderView = () => {
     switch (currentView) {
-      case AppView.LANDING:
-        return <Landing onNavigate={navigateTo} />;
-      case AppView.LOGIN:
-        return <Login onLoginSuccess={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />;
-      case AppView.CHECKOUT:
-        return <Checkout onComplete={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />;
-      case AppView.DASHBOARD:
-        return <Dashboard onLogout={handleLogout} onNavigate={navigateTo} trialRemaining={trialDays} />;
-      case AppView.CHAT_MANAGER:
-        return <ChatManager onNavigate={navigateTo} onLogout={handleLogout} />;
-      case AppView.AGENT_BUILDER:
-        return <AgentBuilder onNavigate={navigateTo} onLogout={handleLogout} />;
-      case AppView.CONNECTIONS:
-        return <Connections onNavigate={navigateTo} onLogout={handleLogout} />;
-      case AppView.ADMIN:
-        return <Admin onNavigate={navigateTo} onLogout={handleLogout} />;
-      default:
-        return <Landing onNavigate={navigateTo} />;
+      case AppView.LANDING: return <Landing onNavigate={navigateTo} />;
+      case AppView.LOGIN: return <Login onLoginSuccess={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />;
+      case AppView.CHECKOUT: return <Checkout onComplete={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />;
+      case AppView.DASHBOARD: return <Dashboard onLogout={handleLogout} onNavigate={navigateTo} trialRemaining={trialDays} />;
+      case AppView.CHAT_MANAGER: return <ChatManager onNavigate={navigateTo} onLogout={handleLogout} />;
+      case AppView.AGENT_BUILDER: return <AgentBuilder onNavigate={navigateTo} onLogout={handleLogout} />;
+      case AppView.CONNECTIONS: return <Connections onNavigate={navigateTo} onLogout={handleLogout} />;
+      case AppView.ADMIN: return <Admin onNavigate={navigateTo} onLogout={handleLogout} />;
+      default: return <Landing onNavigate={navigateTo} />;
     }
   };
 
