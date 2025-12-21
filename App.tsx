@@ -18,25 +18,27 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Garantia absoluta de que a tela de loading vai sair após 3 segundos
+    const fallbackTimeout = setTimeout(() => {
+      setIsLoading(false);
+    }, 3000);
+
     // Configura o listener de mudanças de autenticação
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Supabase Event:", event);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Supabase Auth Event:", event);
       
       if (session) {
         setIsAuthenticated(true);
-        // Se houver qualquer sinal de login ou retorno de OAuth, redirecionamos para o Dashboard
-        // exceto em casos específicos como recuperação de senha
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        // Se o usuário estiver logado e não estiver recuperando senha, vai para dashboard
+        if (currentView === AppView.LANDING || currentView === AppView.LOGIN) {
           if (!window.location.hash.includes('type=recovery')) {
             setCurrentView(AppView.DASHBOARD);
           }
-        } else if (event === 'PASSWORD_RECOVERY') {
-          setCurrentView(AppView.LOGIN);
         }
-        await fetchTrialInfo(session.user.id);
+        // Chamada não-bloqueante (sem await) para não travar o carregamento
+        fetchTrialInfo(session.user.id);
       } else {
         setIsAuthenticated(false);
-        // Se deslogar, volta para a landing
         if (event === 'SIGNED_OUT') {
           setCurrentView(AppView.LANDING);
         }
@@ -44,41 +46,51 @@ const App: React.FC = () => {
       setIsLoading(false);
     });
 
-    // Checagem imediata de sessão existente (persistência)
-    const checkSession = async () => {
+    // Checagem imediata de sessão
+    const checkInitialSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           setIsAuthenticated(true);
-          await fetchTrialInfo(session.user.id);
+          fetchTrialInfo(session.user.id);
           if (!window.location.hash.includes('type=recovery')) {
             setCurrentView(AppView.DASHBOARD);
           }
         }
       } catch (err) {
-        console.error("Session Check Error:", err);
+        console.error("Erro na checagem de sessão:", err);
       } finally {
-        setTimeout(() => setIsLoading(false), 800);
+        setIsLoading(false);
+        clearTimeout(fallbackTimeout);
       }
     };
 
-    checkSession();
+    checkInitialSession();
 
     return () => {
       subscription.unsubscribe();
+      clearTimeout(fallbackTimeout);
     };
-  }, []);
+  }, [currentView]);
 
   const fetchTrialInfo = async (userId: string) => {
     try {
-      const { data } = await supabase.from('profiles').select('trial_start_date').eq('id', userId).single();
-      if (data) {
+      // Usamos uma consulta simples que falha silenciosamente se a tabela não existir
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('trial_start_date')
+        .eq('id', userId)
+        .single();
+      
+      if (data && !error) {
         const start = new Date(data.trial_start_date);
         const now = new Date();
         const diffDays = Math.ceil(Math.abs(now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
         setTrialDays(Math.max(0, 15 - diffDays));
       }
-    } catch (e) { }
+    } catch (e) {
+      // Ignora erros de banco de dados para não quebrar a UI
+    }
   };
 
   const navigateTo = (view: AppView) => {
