@@ -3,8 +3,8 @@ import React, { useState } from 'react';
 import { 
   Search, MessageCircle, MoreVertical, Smartphone, Users, Zap, CheckCircle2, Clock
 } from 'lucide-react';
-import Layout from '../components/Layout';
-import { AppView, KanbanLead } from '../types';
+import Layout from '../components/Layout.tsx';
+import { AppView, KanbanLead } from '../types.ts';
 
 const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
   const [leads, setLeads] = useState<KanbanLead[]>([

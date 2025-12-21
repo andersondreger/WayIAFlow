@@ -4,8 +4,8 @@ import {
   Users, Search, Filter, MoreVertical, Plus, Shield, UserPlus, 
   ArrowUpRight, Trash2, Edit2, Clock, CreditCard, Activity 
 } from 'lucide-react';
-import Layout from '../components/Layout';
-import { AppView, Client } from '../types';
+import Layout from '../components/Layout.tsx';
+import { AppView, Client } from '../types.ts';
 
 const Admin: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
   const clients: Client[] = [

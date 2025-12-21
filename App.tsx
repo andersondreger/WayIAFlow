@@ -20,12 +20,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkUser = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log("Checking session...");
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        
         if (session) {
           setIsAuthenticated(true);
           await fetchTrialInfo(session.user.id);
-        } else {
-          setIsAuthenticated(false);
         }
       } catch (err) {
         console.error("Auth init error:", err);
@@ -36,20 +37,32 @@ const App: React.FC = () => {
 
     checkUser();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    // Fail-safe: Se em 6 segundos ainda estiver carregando, libera a tela
+    const timer = setTimeout(() => {
+      setIsLoading(prev => {
+        if (prev) console.warn("Loading state forced to false by timeout");
+        return false;
+      });
+    }, 6000);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth event:", event);
       setIsAuthenticated(!!session);
       if (session) {
         await fetchTrialInfo(session.user.id);
-        if (currentView === AppView.LOGIN) {
-          setCurrentView(AppView.DASHBOARD);
-        }
       } else {
         setTrialDays(15);
+        if (![AppView.LANDING, AppView.LOGIN, AppView.CHECKOUT].includes(currentView)) {
+          setCurrentView(AppView.LANDING);
+        }
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, [currentView]);
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
+  }, []);
 
   const fetchTrialInfo = async (userId: string) => {
     try {
@@ -66,13 +79,10 @@ const App: React.FC = () => {
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         const remaining = Math.max(0, 15 - diffDays);
         setTrialDays(remaining);
-
-        if (remaining <= 0 && data.status === 'trial' && [AppView.DASHBOARD, AppView.CHAT_MANAGER, AppView.AGENT_BUILDER].includes(currentView)) {
-          setCurrentView(AppView.CHECKOUT);
-        }
       }
     } catch (e) {
-      console.error("Error fetching trial:", e);
+      // Se a tabela não existir ainda ou der erro, mantemos o padrão de 15 dias
+      console.warn("Could not fetch trial info, using default.");
     }
   };
 
@@ -99,8 +109,9 @@ const App: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center gap-6">
+        <div className="w-16 h-16 border-4 border-orange-600 border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(234,88,12,0.2)]"></div>
+        <p className="text-orange-500 font-black text-xs uppercase tracking-[0.3em] animate-pulse">Iniciando Rede Neural...</p>
       </div>
     );
   }

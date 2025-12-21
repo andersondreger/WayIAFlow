@@ -10,9 +10,9 @@ import {
   Copy,
   Plus
 } from 'lucide-react';
-import Layout from '../components/Layout';
-import { AppView } from '../types';
-import { generateAgentContext } from '../services/geminiService';
+import Layout from '../components/Layout.tsx';
+import { AppView } from '../types.ts';
+import { generateAgentContext } from '../services/geminiService.ts';
 
 const AgentBuilder: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
   const [description, setDescription] = useState('');

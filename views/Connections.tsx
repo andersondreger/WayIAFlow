@@ -1,6 +1,5 @@
 
 import React from 'react';
-// Added missing Settings import
 import { 
   Unplug, 
   ExternalLink, 
@@ -17,8 +16,8 @@ import {
   Zap,
   Settings
 } from 'lucide-react';
-import Layout from '../components/Layout';
-import { AppView } from '../types';
+import Layout from '../components/Layout.tsx';
+import { AppView } from '../types.ts';
 
 const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
   return (
