@@ -38,14 +38,21 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
 
   const handleSocialLogin = async (provider: 'google' | 'github') => {
     try {
+      // Usamos window.location.href para garantir que ele volte exatamente para onde estava
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: { redirectTo: window.location.origin }
+        options: { 
+          redirectTo: window.location.origin,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account',
+          }
+        }
       });
       if (error) throw error;
     } catch (error: any) {
       console.error("Erro social login:", error);
-      alert("Erro ao conectar via Social: " + (error.message || "Verifique sua conexão"));
+      alert("Erro ao conectar via Social: " + (error.message || "Verifique sua configuração no painel do Supabase"));
     }
   };
 
@@ -61,7 +68,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
       onLoginSuccess();
     } catch (error: any) {
       console.error("Erro login:", error);
-      alert("Falha na autenticação: " + (error.message || "E-mail ou senha incorretos"));
+      // Se der erro de credenciais, avisamos explicitamente
+      alert("Falha na autenticação: E-mail ou senha incorretos. Verifique se você confirmou seu e-mail.");
     } finally {
       setLoading(false);
     }
@@ -85,11 +93,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
         }
       });
       if (error) throw error;
-      alert("Cadastro realizado! Verifique seu e-mail para confirmar a conta ou tente logar agora.");
+      alert("Cadastro realizado! IMPORTANTE: Verifique sua caixa de entrada e SPAM para confirmar o e-mail antes de tentar logar.");
       setViewMode('login');
     } catch (error: any) {
       console.error("Erro cadastro:", error);
-      alert("Erro ao criar conta: " + (error.message || "Erro inesperado de rede"));
+      alert("Erro ao criar conta: " + (error.message || "Erro inesperado"));
     } finally {
       setLoading(false);
     }
@@ -103,7 +111,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
         redirectTo: window.location.origin
       });
       if (error) throw error;
-      alert("As instruções de recuperação foram enviadas para seu e-mail.");
+      alert("Instruções de recuperação enviadas! Se não chegar em 5 minutos, verifique o SPAM ou as configurações de SMTP no Supabase.");
       setViewMode('login');
     } catch (error: any) {
       alert("Erro: " + error.message);

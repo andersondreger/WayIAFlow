@@ -153,7 +153,7 @@ const Landing: React.FC<{ onNavigate: (view: AppView) => void }> = ({ onNavigate
 
           <div className="flex items-center gap-4">
             <button onClick={() => onNavigate(AppView.LOGIN)} className="text-slate-400 hover:text-white font-black text-[9px] uppercase tracking-widest transition-all px-4">Login</button>
-            <button onClick={() => onNavigate(AppView.CHECKOUT)} className="btn-primary px-6 py-2.5 text-white rounded-xl font-black text-[9px] uppercase tracking-[0.2em] shadow-lg">
+            <button onClick={() => onNavigate(AppView.CHECKOUT)} className="bg-gradient-to-r from-orange-600 to-red-700 hover:from-orange-500 hover:to-red-600 px-6 py-2.5 text-white rounded-xl font-black text-[9px] uppercase tracking-[0.2em] shadow-lg transition-all">
               Começar Agora
             </button>
           </div>
@@ -169,7 +169,7 @@ const Landing: React.FC<{ onNavigate: (view: AppView) => void }> = ({ onNavigate
           </div>
           
           <h1 className="text-5xl md:text-8xl font-black tracking-tighter mb-10 leading-[0.9] max-w-5xl mx-auto">
-            Escalabilidade <span className="gradient-text italic">Imparável</span> via Rede Neural.
+            Escalabilidade <span className="bg-gradient-to-r from-orange-500 to-red-600 bg-clip-text text-transparent italic">Imparável</span> via Rede Neural.
           </h1>
           
           <p className="text-lg md:text-xl text-slate-400 max-w-3xl mx-auto mb-16 leading-relaxed font-medium">
@@ -177,10 +177,10 @@ const Landing: React.FC<{ onNavigate: (view: AppView) => void }> = ({ onNavigate
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-24">
-            <button onClick={() => onNavigate(AppView.CHECKOUT)} className="btn-primary px-12 py-5 text-white rounded-2xl font-black text-lg hover:scale-105 transition-all flex items-center gap-3 shadow-2xl shadow-orange-600/20">
+            <button onClick={() => onNavigate(AppView.CHECKOUT)} className="bg-gradient-to-r from-orange-600 to-red-700 hover:from-orange-500 hover:to-red-600 px-12 py-5 text-white rounded-2xl font-black text-lg hover:scale-105 transition-all flex items-center gap-3 shadow-2xl shadow-orange-600/20">
               Ativar Minha Licença <ArrowRight size={20} />
             </button>
-            <button onClick={() => onNavigate(AppView.LOGIN)} className="px-10 py-5 glass text-white rounded-2xl font-black text-lg hover:bg-white/10 transition-all border border-white/10">
+            <button onClick={() => onNavigate(AppView.LOGIN)} className="px-10 py-5 bg-white/5 backdrop-blur-md text-white rounded-2xl font-black text-lg hover:bg-white/10 transition-all border border-white/10">
               Acessar Portal Gratuito
             </button>
           </div>
@@ -214,7 +214,7 @@ const Landing: React.FC<{ onNavigate: (view: AppView) => void }> = ({ onNavigate
               <Network size={16} /> Enterprise Core Architecture
             </div>
             <h2 className="text-4xl md:text-6xl font-black tracking-tighter leading-tight">
-              Infraestrutura <br /><span className="gradient-text italic">Professional Grade</span>.
+              Infraestrutura <br /><span className="bg-gradient-to-r from-orange-500 to-red-600 bg-clip-text text-transparent italic">Professional Grade</span>.
             </h2>
             <p className="text-lg text-slate-400 leading-relaxed font-medium">
               Sua operação merece estabilidade de nível bancário. Nossa arquitetura combina <span className="text-white font-bold">n8n Workflows</span> e <span className="text-white font-bold">Evolution API</span> em um cluster de alta disponibilidade.
@@ -285,7 +285,7 @@ const Landing: React.FC<{ onNavigate: (view: AppView) => void }> = ({ onNavigate
                  </li>
                ))}
             </ul>
-            <button onClick={() => onNavigate(AppView.CHECKOUT)} className="btn-primary px-10 py-5 rounded-2xl font-black uppercase text-[10px] tracking-[0.3em] shadow-xl">
+            <button onClick={() => onNavigate(AppView.CHECKOUT)} className="bg-gradient-to-r from-orange-600 to-red-700 px-10 py-5 rounded-2xl font-black uppercase text-[10px] tracking-[0.3em] shadow-xl">
               Escalar Meus Canais
             </button>
           </div>
@@ -415,10 +415,6 @@ const Landing: React.FC<{ onNavigate: (view: AppView) => void }> = ({ onNavigate
 
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes dash { to { stroke-dashoffset: -1000; } }
-        @keyframes moveCursor {
-          0%, 100% { transform: translate(-50%, -50%) translate(0, 0); }
-          50% { transform: translate(-50%, -50%) translate(300px, 150px); }
-        }
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }

@@ -54,22 +54,21 @@ const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate, onLog
             <Logo className="h-14 w-auto object-contain" />
           </div>
 
-          <nav className="space-y-1.5">
+          <nav className="space-y-2">
             {menuItems.map((item) => (
               <button
                 key={item.view}
                 onClick={() => onNavigate(item.view)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 group ${
                   activeView === item.view 
-                    ? 'bg-gradient-to-r from-orange-500/10 to-transparent text-orange-400 border border-orange-500/20 shadow-[0_0_20px_rgba(245,158,11,0.05)]' 
+                    ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20' 
                     : 'text-slate-500 hover:bg-white/[0.03] hover:text-white'
                 }`}
               >
-                <div className={`${activeView === item.view ? 'text-orange-400' : 'text-slate-600 group-hover:text-slate-300'} transition-colors`}>
+                <div className={`${activeView === item.view ? 'text-white' : 'text-slate-600 group-hover:text-slate-300'} transition-colors`}>
                   <item.icon size={20} strokeWidth={2} />
                 </div>
-                <span className="font-semibold text-sm tracking-tight">{item.label}</span>
-                {activeView === item.view && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_12px_rgba(249,115,22,1)]" />}
+                <span className="font-bold text-sm tracking-tight">{item.label}</span>
               </button>
             ))}
           </nav>
