@@ -2,9 +2,9 @@
 import React, { useState } from 'react';
 import { 
   ArrowLeft, Mail, Lock, Loader2, Github, User, Phone, 
-  ChevronRight, CheckCircle2, Building2, Briefcase, Globe 
+  ChevronRight, CheckCircle2 
 } from 'lucide-react';
-import { supabase } from '../services/supabase';
+import { supabase } from '../services/supabase.ts';
 
 interface LoginProps {
   onLoginSuccess: () => void;
@@ -26,15 +26,14 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
   const [viewMode, setViewMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [regStep, setRegStep] = useState(1);
   
-  // Form State
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     email: '',
     password: '',
-    q1: '', // Volume de Vendas
-    q2: '', // Objetivo Principal
-    q3: ''  // Como conheceu
+    q1: '',
+    q2: '',
+    q3: ''
   });
 
   const handleSocialLogin = async (provider: 'google' | 'github') => {
@@ -85,7 +84,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
         }
       });
       if (error) throw error;
-      alert("Cadastro realizado! Como estamos em modo de demonstração, você já pode entrar com seus dados.");
+      alert("Cadastro realizado! Verifique seu e-mail ou prossiga com o login.");
       setViewMode('login');
     } catch (error: any) {
       console.error("Erro cadastro:", error);
@@ -130,7 +129,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
 
   return (
     <div className="min-h-screen bg-[#020617] flex flex-col md:flex-row overflow-hidden">
-      {/* Left side: Branding */}
       <div className="hidden md:flex flex-1 bg-gradient-to-br from-orange-600 to-red-700 p-12 flex-col justify-between relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full opacity-20">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white to-transparent blur-3xl scale-150" />
@@ -146,12 +144,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
         </div>
       </div>
 
-      {/* Right side: Forms */}
       <div className="flex-1 flex flex-col justify-center p-8 md:p-24 relative overflow-y-auto custom-scrollbar">
         <div className="absolute top-0 right-0 w-96 h-96 bg-orange-600/5 blur-[120px] pointer-events-none" />
         
         <div className="max-w-md mx-auto w-full relative z-10">
-          {/* Navigation Tabs */}
           <div className="flex items-center justify-between mb-10">
             <button onClick={onBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-xs font-bold uppercase tracking-widest">
               <ArrowLeft size={16} /> Voltar
@@ -168,7 +164,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
             </div>
           </div>
 
-          {/* LOGIN VIEW */}
           {viewMode === 'login' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="mb-10">
@@ -193,7 +188,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
             </div>
           )}
 
-          {/* REGISTER VIEW */}
           {viewMode === 'register' && (
             <div className="animate-in fade-in slide-in-from-right-4 duration-500">
               {regStep === 1 ? (
@@ -219,7 +213,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
               ) : (
                 <div>
                   <div className="mb-8">
-                    <button onClick={() => setRegStep(1)} className="text-slate-500 hover:text-white transition-colors text-[10px] font-black uppercase tracking-widest flex items-center gap-1 mb-4"><ArrowLeft size={12} /> Voltar</button>
                     <h1 className="text-3xl font-black text-white mb-2 tracking-tighter italic">Perfil de Negócio.</h1>
                     <p className="text-slate-500 font-medium text-sm">Personalize sua experiência neural.</p>
                   </div>
@@ -252,30 +245,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
               )}
             </div>
           )}
-
-          {/* FORGOT PASSWORD VIEW */}
-          {viewMode === 'forgot' && (
-            <div className="animate-in fade-in duration-500">
-               <div className="mb-10">
-                <h1 className="text-4xl font-black text-white mb-2 tracking-tighter italic">Resetar Senha.</h1>
-                <p className="text-slate-500 font-medium">Identifique sua conta para prosseguir.</p>
-              </div>
-              <form onSubmit={handleForgotPassword} className="space-y-5">
-                <InputGroup icon={Mail} label="E-mail cadastrado" type="email" placeholder="seu@email.com" value={formData.email} onChange={(v) => setFormData({...formData, email: v})} />
-                <button disabled={loading} className="w-full bg-white text-black py-4 rounded-2xl font-black uppercase text-xs tracking-[0.2em] flex items-center justify-center gap-2 transition-all active:scale-95">
-                  {loading ? <Loader2 className="animate-spin" /> : 'Solicitar Link'}
-                </button>
-                <button type="button" onClick={() => setViewMode('login')} className="w-full text-[10px] font-black text-slate-500 hover:text-white uppercase tracking-widest text-center mt-4">Voltar ao Login</button>
-              </form>
-            </div>
-          )}
         </div>
       </div>
     </div>
   );
 };
 
-// Reusable Components
 const InputGroup: React.FC<{ icon: any, label?: string, type?: string, placeholder: string, value: string, onChange: (v: string) => void, noLabel?: boolean }> = ({ icon: Icon, label, type = 'text', placeholder, value, onChange, noLabel }) => (
   <div className="space-y-2 group">
     {!noLabel && label && <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest group-focus-within:text-orange-500 transition-colors">{label}</label>}

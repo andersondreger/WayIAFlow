@@ -2,11 +2,10 @@
 import React from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { 
-  TrendingUp, Users, MessageCircle, Activity, ArrowUpRight, ArrowDownRight, 
-  Filter, Download, Calendar, Smartphone, Unplug, Webhook, CheckCircle2, ShieldAlert
+  TrendingUp, Users, MessageCircle, Activity, Smartphone, Webhook
 } from 'lucide-react';
-import Layout from '../components/Layout';
-import { AppView } from '../types';
+import Layout from '../components/Layout.tsx';
+import { AppView } from '../types.ts';
 
 const data = [
   { name: 'Seg', v: 4200 }, { name: 'Ter', v: 5100 }, { name: 'Qua', v: 3800 },
@@ -33,7 +32,6 @@ const Dashboard: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => vo
   return (
     <Layout activeView={AppView.DASHBOARD} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="space-y-10">
-        {/* Trial Banner */}
         {trialRemaining > 0 && (
           <div className="bg-gradient-to-r from-orange-600 to-red-600 p-4 rounded-2xl flex items-center justify-between shadow-xl shadow-orange-600/10">
             <div className="flex items-center gap-4">

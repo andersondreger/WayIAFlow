@@ -1,15 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppView } from './types';
-import Landing from './views/Landing';
-import Login from './views/Login';
-import Checkout from './views/Checkout';
-import Dashboard from './views/Dashboard';
-import ChatManager from './views/ChatManager';
-import AgentBuilder from './views/AgentBuilder';
-import Connections from './views/Connections';
-import Admin from './views/Admin';
-import { supabase } from './services/supabase';
+import { AppView } from './types.ts';
+import Landing from './views/Landing.tsx';
+import Login from './views/Login.tsx';
+import Checkout from './views/Checkout.tsx';
+import Dashboard from './views/Dashboard.tsx';
+import ChatManager from './views/ChatManager.tsx';
+import AgentBuilder from './views/AgentBuilder.tsx';
+import Connections from './views/Connections.tsx';
+import Admin from './views/Admin.tsx';
+import { supabase } from './services/supabase.ts';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
@@ -17,18 +17,21 @@ const App: React.FC = () => {
   const [trialDays, setTrialDays] = useState<number>(15);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Listener de Autenticação e Busca de Perfil
   useEffect(() => {
     const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        setIsAuthenticated(true);
-        await fetchTrialInfo(session.user.id);
-      } else {
-        setIsAuthenticated(false);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          setIsAuthenticated(true);
+          await fetchTrialInfo(session.user.id);
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch (err) {
+        console.error("Auth init error:", err);
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     checkUser();
@@ -41,7 +44,7 @@ const App: React.FC = () => {
           setCurrentView(AppView.DASHBOARD);
         }
       } else {
-        setTrialDays(15); // Reset default
+        setTrialDays(15);
       }
     });
 
@@ -49,24 +52,27 @@ const App: React.FC = () => {
   }, [currentView]);
 
   const fetchTrialInfo = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('trial_start_date, status')
-      .eq('id', userId)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('trial_start_date, status')
+        .eq('id', userId)
+        .single();
 
-    if (data && !error) {
-      const start = new Date(data.trial_start_date);
-      const now = new Date();
-      const diffTime = Math.abs(now.getTime() - start.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      const remaining = Math.max(0, 15 - diffDays);
-      setTrialDays(remaining);
+      if (data && !error) {
+        const start = new Date(data.trial_start_date);
+        const now = new Date();
+        const diffTime = Math.abs(now.getTime() - start.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const remaining = Math.max(0, 15 - diffDays);
+        setTrialDays(remaining);
 
-      // Se o plano for trial e expirou, bloqueia
-      if (remaining <= 0 && data.status === 'trial' && [AppView.DASHBOARD, AppView.CHAT_MANAGER, AppView.AGENT_BUILDER].includes(currentView)) {
-        setCurrentView(AppView.CHECKOUT);
+        if (remaining <= 0 && data.status === 'trial' && [AppView.DASHBOARD, AppView.CHAT_MANAGER, AppView.AGENT_BUILDER].includes(currentView)) {
+          setCurrentView(AppView.CHECKOUT);
+        }
       }
+    } catch (e) {
+      console.error("Error fetching trial:", e);
     }
   };
 
