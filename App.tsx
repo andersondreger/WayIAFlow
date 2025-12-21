@@ -18,24 +18,27 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Garantia absoluta de que a tela de loading vai sair após 3 segundos
-    const fallbackTimeout = setTimeout(() => {
-      setIsLoading(false);
-    }, 3000);
+    // Monitora mudanças no hash da URL (comum em retornos de OAuth)
+    const handleAuthRedirect = () => {
+      if (window.location.hash.includes('access_token')) {
+        setIsLoading(true);
+      }
+    };
+    window.addEventListener('hashchange', handleAuthRedirect);
 
-    // Configura o listener de mudanças de autenticação
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("Supabase Auth Event:", event);
+    // Listener de autenticação do Supabase
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Evento Auth:", event);
       
       if (session) {
         setIsAuthenticated(true);
-        // Se o usuário estiver logado e não estiver recuperando senha, vai para dashboard
-        if (currentView === AppView.LANDING || currentView === AppView.LOGIN) {
-          if (!window.location.hash.includes('type=recovery')) {
-            setCurrentView(AppView.DASHBOARD);
-          }
+        // Se houver sessão, o destino padrão é o Dashboard
+        // exceto se o usuário estiver explicitamente em um fluxo de recuperação de senha
+        if (!window.location.hash.includes('type=recovery')) {
+          setCurrentView(AppView.DASHBOARD);
+        } else {
+          setCurrentView(AppView.LOGIN);
         }
-        // Chamada não-bloqueante (sem await) para não travar o carregamento
         fetchTrialInfo(session.user.id);
       } else {
         setIsAuthenticated(false);
@@ -46,8 +49,8 @@ const App: React.FC = () => {
       setIsLoading(false);
     });
 
-    // Checagem imediata de sessão
-    const checkInitialSession = async () => {
+    // Checagem inicial de sessão (persistência)
+    const checkSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
@@ -58,24 +61,22 @@ const App: React.FC = () => {
           }
         }
       } catch (err) {
-        console.error("Erro na checagem de sessão:", err);
+        console.error("Erro sessão inicial:", err);
       } finally {
         setIsLoading(false);
-        clearTimeout(fallbackTimeout);
       }
     };
 
-    checkInitialSession();
+    checkSession();
 
     return () => {
       subscription.unsubscribe();
-      clearTimeout(fallbackTimeout);
+      window.removeEventListener('hashchange', handleAuthRedirect);
     };
-  }, [currentView]);
+  }, []);
 
   const fetchTrialInfo = async (userId: string) => {
     try {
-      // Usamos uma consulta simples que falha silenciosamente se a tabela não existir
       const { data, error } = await supabase
         .from('profiles')
         .select('trial_start_date')
@@ -89,7 +90,7 @@ const App: React.FC = () => {
         setTrialDays(Math.max(0, 15 - diffDays));
       }
     } catch (e) {
-      // Ignora erros de banco de dados para não quebrar a UI
+      // Falha silenciosa se a tabela não existir
     }
   };
 
