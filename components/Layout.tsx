@@ -9,10 +9,9 @@ import {
   LogOut, 
   Bell, 
   Settings,
-  ChevronRight,
-  Plus
+  ChevronRight
 } from 'lucide-react';
-import { AppView } from '../types';
+import { AppView } from '../types.ts';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -49,7 +48,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate, onLog
 
   return (
     <div className="flex h-screen bg-slate-950/50 overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-64 bg-[#020617] border-r border-white/5 flex flex-col hidden md:flex shrink-0">
         <div className="p-8">
           <div className="flex items-center gap-2 mb-10 cursor-pointer" onClick={() => onNavigate(AppView.DASHBOARD)}>
@@ -96,7 +94,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activeView, onNavigate, onLog
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-orange-600/5 blur-[120px] rounded-full pointer-events-none -translate-y-1/2 translate-x-1/2" />
         

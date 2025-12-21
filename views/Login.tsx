@@ -74,6 +74,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
         email: formData.email,
         password: formData.password,
         options: {
+          emailRedirectTo: window.location.origin,
           data: {
             full_name: formData.name,
             phone: formData.phone,
@@ -84,7 +85,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
         }
       });
       if (error) throw error;
-      alert("Cadastro realizado! Verifique seu e-mail ou prossiga com o login.");
+      alert("Cadastro realizado! Verifique seu e-mail para confirmar a conta ou tente logar agora.");
       setViewMode('login');
     } catch (error: any) {
       console.error("Erro cadastro:", error);
@@ -98,7 +99,9 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(formData.email);
+      const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+        redirectTo: window.location.origin
+      });
       if (error) throw error;
       alert("As instruções de recuperação foram enviadas para seu e-mail.");
       setViewMode('login');
@@ -184,6 +187,23 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
                   {loading ? <Loader2 className="animate-spin" /> : 'Entrar no Sistema'}
                 </button>
                 <SocialAuth onGoogle={() => handleSocialLogin('google')} onGithub={() => handleSocialLogin('github')} />
+              </form>
+            </div>
+          )}
+
+          {viewMode === 'forgot' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="mb-10">
+                <h1 className="text-4xl font-black text-white mb-2 tracking-tighter italic">Recuperar Senha.</h1>
+                <p className="text-slate-500 font-medium">Informe seu e-mail para receber as instruções.</p>
+              </div>
+
+              <form onSubmit={handleForgotPassword} className="space-y-5">
+                <InputGroup icon={Mail} label="E-mail de Cadastro" type="email" placeholder="adm@wayflow.ia" value={formData.email} onChange={(v) => setFormData({...formData, email: v})} />
+                <button disabled={loading} className="w-full bg-white text-black py-4 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50">
+                  {loading ? <Loader2 className="animate-spin" /> : 'Enviar E-mail'}
+                </button>
+                <button type="button" onClick={() => setViewMode('login')} className="w-full text-center text-xs font-bold text-slate-500 uppercase tracking-widest pt-4">Voltar para Login</button>
               </form>
             </div>
           )}
