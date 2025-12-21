@@ -1,0 +1,8 @@
+{
+  "name": "WayFlow iA - Checkout Recovery & AI Automations",
+  "description": "A high-end platform for recovering lost checkouts, managing WhatsApp automations via Evolution API, n8n integrations, and AI-powered customer service agents.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
