@@ -103,7 +103,9 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: { redirectTo: window.location.origin }
+        options: { 
+          redirectTo: window.location.origin
+        }
       });
       if (error) throw error;
     } catch (error: any) {
