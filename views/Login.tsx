@@ -21,6 +21,25 @@ const Logo: React.FC<{ className?: string }> = ({ className = "h-12" }) => {
   );
 };
 
+const SocialLogins: React.FC<{ onSocial: (p: 'google' | 'github') => void }> = ({ onSocial }) => (
+  <div className="mt-10">
+    <div className="relative mb-8">
+      <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
+      <div className="relative flex justify-center text-[10px] uppercase font-black tracking-widest"><span className="bg-[#020617] px-4 text-slate-600">Ou continue com</span></div>
+    </div>
+    <div className="grid grid-cols-2 gap-4">
+      <button type="button" onClick={() => onSocial('google')} className="flex items-center justify-center gap-3 bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] py-3.5 rounded-2xl transition-all group">
+        <Chrome size={18} className="text-orange-500 group-hover:scale-110 transition-transform" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-white">Google</span>
+      </button>
+      <button type="button" onClick={() => onSocial('github')} className="flex items-center justify-center gap-3 bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] py-3.5 rounded-2xl transition-all group">
+        <Github size={18} className="text-slate-300 group-hover:scale-110 transition-transform" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-white">GitHub</span>
+      </button>
+    </div>
+  </div>
+);
+
 const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'login' | 'register' | 'forgot' | 'update_password'>('login');
@@ -63,7 +82,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
     if (formData.password !== formData.confirmPassword) return alert("As senhas não coincidem.");
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
@@ -164,7 +183,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex justify-between items-center mb-10">
                  <button onClick={onBack} className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><ArrowLeft size={14}/> Site Principal</button>
-                 <button onClick={() => setViewMode('register')} className="text-xs font-black text-orange-500 uppercase tracking-widest">Criar Conta</button>
+                 <button onClick={() => setViewMode('register')} className="text-xs font-black text-orange-500 uppercase tracking-widest hover:text-orange-400 transition-colors">Criar Conta</button>
               </div>
               <h1 className="text-4xl font-black text-white mb-2 tracking-tighter italic">Login.</h1>
               <p className="text-slate-500 font-medium mb-10">Acesse seu painel neural.</p>
@@ -178,7 +197,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
                    </div>
                    <InputGroup icon={Lock} type="password" placeholder="••••••••" value={formData.password} onChange={(v) => setFormData({...formData, password: v})} noLabel />
                 </div>
-                <button disabled={loading} className="w-full bg-orange-600 py-4 rounded-2xl text-white font-black uppercase text-xs tracking-[0.2em] shadow-xl">
+                <button disabled={loading} className="w-full bg-orange-600 py-4 rounded-2xl text-white font-black uppercase text-xs tracking-[0.2em] shadow-xl hover:bg-orange-500 transition-all">
                   {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Entrar na Plataforma'}
                 </button>
               </form>
@@ -200,7 +219,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
                   <InputGroup icon={Lock} label="Senha" type="password" placeholder="••••••••" value={formData.password} onChange={(v) => setFormData({...formData, password: v})} />
                   <InputGroup icon={Lock} label="Confirmar" type="password" placeholder="••••••••" value={formData.confirmPassword} onChange={(v) => setFormData({...formData, confirmPassword: v})} />
                 </div>
-                <button disabled={loading} className="w-full bg-orange-600 py-4 rounded-2xl text-white font-black uppercase text-xs tracking-[0.2em] shadow-xl">
+                <button disabled={loading} className="w-full bg-orange-600 py-4 rounded-2xl text-white font-black uppercase text-xs tracking-[0.2em] shadow-xl hover:bg-orange-500 transition-all">
                   {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Ativar Minha Conta'}
                 </button>
               </form>
@@ -213,10 +232,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
               <p className="text-slate-500 font-medium mb-10">Enviaremos um link para seu e-mail.</p>
               <form onSubmit={handleForgotPassword} className="space-y-5">
                 <InputGroup icon={Mail} label="Seu e-mail" type="email" placeholder="adm@wayflow.ia" value={formData.email} onChange={(v) => setFormData({...formData, email: v})} />
-                <button disabled={loading} className="w-full bg-white text-black py-4 rounded-2xl font-black uppercase text-xs tracking-[0.2em]">
+                <button disabled={loading} className="w-full bg-white text-black py-4 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-xl hover:bg-slate-100 transition-all">
                   {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Enviar Recuperação'}
                 </button>
-                <button type="button" onClick={() => setViewMode('login')} className="w-full text-center text-xs font-bold text-slate-500 mt-4">Cancelar</button>
+                <button type="button" onClick={() => setViewMode('login')} className="w-full text-center text-xs font-bold text-slate-500 mt-4 uppercase tracking-widest">Cancelar</button>
               </form>
             </div>
           )}
@@ -225,25 +244,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
     </div>
   );
 };
-
-const SocialLogins: React.FC<{ onSocial: (p: 'google' | 'github') => void }> = ({ onSocial }) => (
-  <div className="mt-10">
-    <div className="relative mb-8">
-      <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
-      <div className="relative flex justify-center text-[10px] uppercase font-black tracking-widest"><span className="bg-[#020617] px-4 text-slate-600">Ou continue com</span></div>
-    </div>
-    <div className="grid grid-cols-2 gap-4">
-      <button onClick={() => onSocial('google')} className="flex items-center justify-center gap-3 bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] py-3.5 rounded-2xl transition-all">
-        <Chrome size={18} className="text-orange-500" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-white">Google</span>
-      </button>
-      <button onClick={() => onSocial('github')} className="flex items-center justify-center gap-3 bg-white/[0.03] border border-white/5 hover:bg-white/[0.08] py-3.5 rounded-2xl transition-all">
-        <Github size={18} className="text-slate-300" />
-        <span className="text-[10px] font-black uppercase tracking-widest text-white">GitHub</span>
-      </button>
-    </div>
-  </div>
-);
 
 const InputGroup: React.FC<{ icon: any, label?: string, type?: string, placeholder: string, value: string, onChange: (v: string) => void, noLabel?: boolean }> = ({ icon: Icon, label, type = 'text', placeholder, value, onChange, noLabel }) => (
   <div className="space-y-2 group">
