@@ -18,75 +18,70 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Configurar o Listener de Auth APENAS UMA VEZ no mount
+    // Configura o listener de mudanças de autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Supabase Auth Event:", event);
+      console.log("Supabase Event:", event);
       
       if (session) {
         setIsAuthenticated(true);
-        // Se for recuperação de senha, forçamos a view de login/update
-        if (event === 'PASSWORD_RECOVERY') {
+        // Se houver qualquer sinal de login ou retorno de OAuth, redirecionamos para o Dashboard
+        // exceto em casos específicos como recuperação de senha
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+          if (!window.location.hash.includes('type=recovery')) {
+            setCurrentView(AppView.DASHBOARD);
+          }
+        } else if (event === 'PASSWORD_RECOVERY') {
           setCurrentView(AppView.LOGIN);
-        } else if (event === 'SIGNED_IN') {
-          // Só muda para Dashboard se estiver na Landing ou Login para evitar pulos indesejados
-          setCurrentView(prev => (prev === AppView.LANDING || prev === AppView.LOGIN) ? AppView.DASHBOARD : prev);
         }
         await fetchTrialInfo(session.user.id);
       } else {
         setIsAuthenticated(false);
+        // Se deslogar, volta para a landing
+        if (event === 'SIGNED_OUT') {
+          setCurrentView(AppView.LANDING);
+        }
       }
       setIsLoading(false);
     });
 
-    // 2. Checagem inicial de sessão
-    const checkInitialSession = async () => {
+    // Checagem imediata de sessão existente (persistência)
+    const checkSession = async () => {
       try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        
+        const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           setIsAuthenticated(true);
           await fetchTrialInfo(session.user.id);
-          // Se houver sessão inicial, vamos para o dashboard (a menos que seja recovery)
           if (!window.location.hash.includes('type=recovery')) {
             setCurrentView(AppView.DASHBOARD);
           }
         }
       } catch (err) {
-        console.error("Erro na checagem de sessão:", err);
+        console.error("Session Check Error:", err);
       } finally {
-        // Garante que o loading saia da tela após 1.5s no máximo ou erro
-        setTimeout(() => setIsLoading(false), 500);
+        setTimeout(() => setIsLoading(false), 800);
       }
     };
 
-    checkInitialSession();
-
-    // Fallback: Se após 5 segundos ainda estiver carregando, forçamos a saída
-    const timeoutFallback = setTimeout(() => setIsLoading(false), 5000);
+    checkSession();
 
     return () => {
       subscription.unsubscribe();
-      clearTimeout(timeoutFallback);
     };
-  }, []); // Array vazio para rodar apenas uma vez!
+  }, []);
 
   const fetchTrialInfo = async (userId: string) => {
     try {
-      const { data, error } = await supabase.from('profiles').select('trial_start_date').eq('id', userId).single();
+      const { data } = await supabase.from('profiles').select('trial_start_date').eq('id', userId).single();
       if (data) {
         const start = new Date(data.trial_start_date);
         const now = new Date();
         const diffDays = Math.ceil(Math.abs(now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
         setTrialDays(Math.max(0, 15 - diffDays));
       }
-    } catch (e) {
-      // Perfil pode não existir ainda
-    }
+    } catch (e) { }
   };
 
   const navigateTo = (view: AppView) => {
-    // Proteção de rotas autenticadas
     const privateViews = [AppView.DASHBOARD, AppView.CHAT_MANAGER, AppView.AGENT_BUILDER, AppView.CONNECTIONS, AppView.ADMIN];
     if (privateViews.includes(view) && !isAuthenticated) {
       setCurrentView(AppView.LOGIN);
@@ -98,8 +93,6 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setIsAuthenticated(false);
-    setCurrentView(AppView.LANDING);
   };
 
   if (isLoading) {
@@ -113,7 +106,7 @@ const App: React.FC = () => {
         </div>
         <div className="text-center space-y-2">
           <p className="text-orange-500 font-black text-[10px] uppercase tracking-[0.4em] animate-pulse">Sincronizando WayFlow iA</p>
-          <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">Aguardando resposta neural...</p>
+          <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">Iniciando Protocolo Seguro...</p>
         </div>
       </div>
     );

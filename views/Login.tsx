@@ -101,10 +101,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
 
   const handleSocialLogin = async (provider: 'google' | 'github') => {
     try {
+      // Usamos window.location.origin para garantir que volte para a raiz do site atual
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: { 
-          redirectTo: window.location.origin
+          redirectTo: window.location.origin,
+          skipBrowserRedirect: false
         }
       });
       if (error) throw error;
