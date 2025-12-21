@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppView } from './types.ts';
+import { AppView, UserProfile } from './types.ts';
 import Landing from './views/Landing.tsx';
 import Login from './views/Login.tsx';
 import Checkout from './views/Checkout.tsx';
@@ -10,136 +10,100 @@ import AgentBuilder from './views/AgentBuilder.tsx';
 import Connections from './views/Connections.tsx';
 import Admin from './views/Admin.tsx';
 import { supabase } from './services/supabase.ts';
+import { X, ChevronRight, Zap, CheckCircle2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [trialDays, setTrialDays] = useState<number>(15);
   const [isLoading, setIsLoading] = useState(true);
+  const [showGuide, setShowGuide] = useState(true);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
-    // Monitora mudanças no hash da URL (comum em retornos de OAuth)
-    const handleAuthRedirect = () => {
-      if (window.location.hash.includes('access_token')) {
-        setIsLoading(true);
-      }
-    };
-    window.addEventListener('hashchange', handleAuthRedirect);
-
-    // Listener de autenticação do Supabase
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Evento Auth:", event);
-      
       if (session) {
         setIsAuthenticated(true);
-        // Se houver sessão, o destino padrão é o Dashboard
-        // exceto se o usuário estiver explicitamente em um fluxo de recuperação de senha
-        if (!window.location.hash.includes('type=recovery')) {
+        const role = session.user.email === 'adm@wayflow.ia' ? 'admin' : 'user';
+        setUserProfile({
+          id: session.user.id,
+          name: session.user.user_metadata.full_name || 'Usuário Alpha',
+          email: session.user.email || '',
+          avatar: `https://picsum.photos/seed/${session.user.id}/100/100`,
+          role: role as 'admin' | 'user',
+          plan: role === 'admin' ? 'Enterprise' : 'Trial'
+        });
+        if (currentView === AppView.LOGIN || currentView === AppView.LANDING) {
           setCurrentView(AppView.DASHBOARD);
-        } else {
-          setCurrentView(AppView.LOGIN);
         }
-        fetchTrialInfo(session.user.id);
       } else {
         setIsAuthenticated(false);
-        if (event === 'SIGNED_OUT') {
-          setCurrentView(AppView.LANDING);
-        }
+        setUserProfile(null);
+        if (event === 'SIGNED_OUT') setCurrentView(AppView.LANDING);
       }
       setIsLoading(false);
     });
 
-    // Checagem inicial de sessão (persistência)
-    const checkSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          setIsAuthenticated(true);
-          fetchTrialInfo(session.user.id);
-          if (!window.location.hash.includes('type=recovery')) {
-            setCurrentView(AppView.DASHBOARD);
-          }
-        }
-      } catch (err) {
-        console.error("Erro sessão inicial:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkSession();
-
-    return () => {
-      subscription.unsubscribe();
-      window.removeEventListener('hashchange', handleAuthRedirect);
-    };
-  }, []);
-
-  const fetchTrialInfo = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('trial_start_date')
-        .eq('id', userId)
-        .single();
-      
-      if (data && !error) {
-        const start = new Date(data.trial_start_date);
-        const now = new Date();
-        const diffDays = Math.ceil(Math.abs(now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-        setTrialDays(Math.max(0, 15 - diffDays));
-      }
-    } catch (e) {
-      // Falha silenciosa se a tabela não existir
-    }
-  };
+    return () => subscription.unsubscribe();
+  }, [currentView]);
 
   const navigateTo = (view: AppView) => {
-    const privateViews = [AppView.DASHBOARD, AppView.CHAT_MANAGER, AppView.AGENT_BUILDER, AppView.CONNECTIONS, AppView.ADMIN];
-    if (privateViews.includes(view) && !isAuthenticated) {
-      setCurrentView(AppView.LOGIN);
+    if (view === AppView.ADMIN && userProfile?.role !== 'admin') {
+      alert("Acesso restrito ao Administrador Master.");
       return;
     }
     setCurrentView(view);
     window.scrollTo(0, 0);
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
+  if (isLoading) return <div className="min-h-screen bg-[#020617] flex items-center justify-center"><Zap className="text-orange-500 animate-pulse" size={48} /></div>;
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center gap-6 p-10">
-        <div className="relative">
-          <div className="w-20 h-20 border-4 border-orange-600/20 border-t-orange-600 rounded-full animate-spin" />
-          <div className="absolute inset-0 flex items-center justify-center">
-             <div className="w-10 h-10 border-4 border-red-600/20 border-b-red-600 rounded-full animate-spin [animation-duration:1.5s]" />
+  return (
+    <div className="min-h-screen relative">
+      {/* Guia Interativo WayFlow */}
+      {isAuthenticated && showGuide && currentView === AppView.DASHBOARD && (
+        <div className="fixed bottom-10 right-10 w-80 bg-[#020617] border border-white/10 rounded-[2.5rem] shadow-2xl z-[100] p-6 animate-in slide-in-from-bottom-10">
+          <button onClick={() => setShowGuide(false)} className="absolute top-4 right-4 text-slate-500 hover:text-white"><X size={16} /></button>
+          <div className="flex items-center gap-3 mb-6">
+             <div className="w-10 h-10 bg-orange-600/20 rounded-xl flex items-center justify-center text-orange-500"><Zap size={20} /></div>
+             <div>
+                <h4 className="text-sm font-black text-white italic">Guia WayFlow</h4>
+                <p className="text-[10px] text-slate-500 uppercase font-black">4 Passos para o Sucesso</p>
+             </div>
           </div>
+          <div className="space-y-3 mb-6">
+             <GuideItem step={1} label="Conectar Evolution API" done={false} />
+             <GuideItem step={2} label="Vincular WhatsApp Web" done={false} />
+             <GuideItem step={3} label="Criar Agente Neural" done={false} />
+             <GuideItem step={4} label="Ativar n8n Portainer" done={false} />
+          </div>
+          <button onClick={() => navigateTo(AppView.CONNECTIONS)} className="w-full py-3 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all">Começar Configuração</button>
         </div>
-        <div className="text-center space-y-2">
-          <p className="text-orange-500 font-black text-[10px] uppercase tracking-[0.4em] animate-pulse">Sincronizando WayFlow iA</p>
-          <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">Iniciando Protocolo Seguro...</p>
-        </div>
-      </div>
-    );
-  }
+      )}
 
-  const renderView = () => {
-    switch (currentView) {
-      case AppView.LANDING: return <Landing onNavigate={navigateTo} />;
-      case AppView.LOGIN: return <Login onLoginSuccess={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />;
-      case AppView.CHECKOUT: return <Checkout onComplete={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />;
-      case AppView.DASHBOARD: return <Dashboard onLogout={handleLogout} onNavigate={navigateTo} trialRemaining={trialDays} />;
-      case AppView.CHAT_MANAGER: return <ChatManager onNavigate={navigateTo} onLogout={handleLogout} />;
-      case AppView.AGENT_BUILDER: return <AgentBuilder onNavigate={navigateTo} onLogout={handleLogout} />;
-      case AppView.CONNECTIONS: return <Connections onNavigate={navigateTo} onLogout={handleLogout} />;
-      case AppView.ADMIN: return <Admin onNavigate={navigateTo} onLogout={handleLogout} />;
-      default: return <Landing onNavigate={navigateTo} />;
-    }
-  };
-
-  return <div className="min-h-screen">{renderView()}</div>;
+      {currentView === AppView.LANDING && <Landing onNavigate={navigateTo} />}
+      {currentView === AppView.LOGIN && <Login onLoginSuccess={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />}
+      {currentView === AppView.CHECKOUT && <Checkout onComplete={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />}
+      
+      {isAuthenticated && userProfile && (
+        <>
+          {currentView === AppView.DASHBOARD && <Dashboard onLogout={() => supabase.auth.signOut()} onNavigate={navigateTo} />}
+          {currentView === AppView.CHAT_MANAGER && <ChatManager onNavigate={navigateTo} onLogout={() => supabase.auth.signOut()} />}
+          {currentView === AppView.AGENT_BUILDER && <AgentBuilder onNavigate={navigateTo} onLogout={() => supabase.auth.signOut()} />}
+          {currentView === AppView.CONNECTIONS && <Connections onNavigate={navigateTo} onLogout={() => supabase.auth.signOut()} />}
+          {currentView === AppView.ADMIN && <Admin onNavigate={navigateTo} onLogout={() => supabase.auth.signOut()} />}
+        </>
+      )}
+    </div>
+  );
 };
+
+const GuideItem: React.FC<{ step: number, label: string, done: boolean }> = ({ step, label, done }) => (
+  <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group">
+    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${done ? 'bg-emerald-500 text-white' : 'bg-white/5 text-slate-500 border border-white/10'}`}>
+      {done ? <CheckCircle2 size={12} /> : step}
+    </div>
+    <span className={`text-[11px] font-bold ${done ? 'text-slate-400' : 'text-slate-200'} group-hover:text-orange-500 transition-colors`}>{label}</span>
+  </div>
+);
 
 export default App;
