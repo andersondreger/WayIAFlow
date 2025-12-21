@@ -151,12 +151,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
   return (
     <div className="min-h-screen bg-[#020617] flex flex-col md:flex-row overflow-hidden">
       {/* Lado Esquerdo - Branding */}
-      <div className="hidden md:flex flex-1 bg-gradient-to-br from-orange-600 to-red-700 p-12 flex-col justify-start gap-32 relative overflow-hidden">
+      <div className="hidden md:flex flex-1 bg-gradient-to-br from-orange-600 to-red-700 p-12 flex-col justify-start gap-20 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full opacity-20 bg-[radial-gradient(circle_at_center,_white_0%,transparent_70%)] blur-3xl scale-150" />
         <div className="relative z-10 cursor-pointer" onClick={onBack}><Logo className="h-16 w-auto" /></div>
         <div className="relative z-10 animate-in fade-in slide-in-from-left-4 duration-700">
-          <h2 className="text-5xl font-black text-white mb-6 leading-tight tracking-tighter italic">WayFlow iA <br /> Onde a Automação Encontra o Lucro.</h2>
-          <p className="text-orange-100 text-lg max-w-md font-medium">Recupere suas vendas perdidas e escale sua operação com a melhor infraestrutura de inteligência neural do mercado.</p>
+          <h2 className="text-5xl font-black text-white mb-6 leading-tight tracking-tighter italic">WayFlow iA <br /> Evolution Engine.</h2>
+          <p className="text-orange-100 text-lg max-w-md font-medium">Acesse a maior infraestrutura de automação do mercado e escale sua operação hoje.</p>
         </div>
       </div>
 
