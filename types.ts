@@ -10,6 +10,8 @@ export enum AppView {
   ADMIN = 'ADMIN'
 }
 
+export type LLMModel = 'gemini-3-flash-preview' | 'gemini-3-pro-preview' | 'gemini-2.5-flash-native-audio-preview-09-2025';
+
 export interface Client {
   id: string;
   name: string;
@@ -17,7 +19,7 @@ export interface Client {
   status: 'active' | 'inactive' | 'trial' | 'expired';
   plan: 'Free Trial' | 'Basic' | 'Pro' | 'Enterprise';
   lastActive: string;
-  trialStartDate: string; // ISO Date
+  trialStartDate: string;
   remainingDays: number;
   totalSpent: number;
 }
@@ -25,11 +27,11 @@ export interface Client {
 export interface Integration {
   id: string;
   name: string;
-  type: 'n8n' | 'evolution' | 'custom';
+  type: 'n8n' | 'evolution' | 'llm';
   status: 'connected' | 'disconnected' | 'pending';
-  lastSync: string;
-  apiUrl?: string;
-  apiKey?: string;
+  apiUrl: string;
+  apiKey: string;
+  secret?: string;
 }
 
 export interface ChatMessage {
@@ -37,13 +39,16 @@ export interface ChatMessage {
   sender: 'user' | 'agent' | 'system';
   content: string;
   timestamp: string;
+  type?: 'text' | 'audio' | 'image';
 }
 
 export interface KanbanLead {
   id: string;
   name: string;
+  phone: string;
   lastMessage: string;
   value: number;
   avatar: string;
-  columnId: 'new' | 'chatting' | 'followup' | 'won';
+  columnId: 'new' | 'ai_processing' | 'human_needed' | 'won';
+  status: 'online' | 'offline';
 }
