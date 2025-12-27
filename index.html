@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WayFlow iA | Central de Automação Inteligente</title>
     
-    <!-- Polyfill essencial para evitar erro de 'process is not defined' -->
+    <!-- Polyfill essencial -->
     <script>
       window.process = {
         env: {
@@ -16,7 +16,7 @@
     </script>
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;600;700;900&display=swap" rel="stylesheet">
     <style>
         :root {
             --brand-orange: #f59e0b;
@@ -29,6 +29,9 @@
             scroll-behavior: smooth;
             background-color: #020617;
             margin: 0;
+        }
+        .font-outfit {
+            font-family: 'Outfit', sans-serif;
         }
         .mesh-gradient {
             background-color: #020617;
@@ -44,21 +47,8 @@
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        .btn-primary {
-            background: linear-gradient(to right, #ea580c, #dc2626);
-            transition: all 0.3s ease;
-        }
-        .btn-primary:hover {
-            transform: scale(1.02);
-            box-shadow: 0 0 20px rgba(234, 88, 12, 0.3);
-        }
         .glass {
             background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-        }
-        .glass-dark {
-            background: rgba(2, 6, 23, 0.8);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
@@ -71,6 +61,10 @@
         .custom-scrollbar::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
+        }
+        /* Efeito de brilho no texto do menu */
+        .text-glow-orange {
+            text-shadow: 0 0 15px rgba(245, 158, 11, 0.5);
         }
     </style>
 
@@ -91,22 +85,6 @@
 </head>
 <body class="mesh-gradient text-slate-200 antialiased min-h-screen">
     <div id="root"></div>
-    
-    <script>
-      window.onerror = function(msg, url, lineNo, columnNo, error) {
-        console.error('Fatal Error:', msg, 'at', url, ':', lineNo);
-        const root = document.getElementById('root');
-        if (root && root.innerHTML === "") {
-          root.innerHTML = `<div style="padding: 40px; color: white; text-align: center; font-family: sans-serif;">
-            <h2 style="color: #f59e0b;">Erro Crítico de Inicialização</h2>
-            <p style="color: #94a3b8;">${msg}</p>
-            <p style="font-size: 12px; color: #64748b;">Verifique o console do navegador para mais detalhes.</p>
-          </div>`;
-        }
-        return false;
-      };
-    </script>
-
     <script type="module" src="./index.tsx"></script>
 </body>
 </html>
