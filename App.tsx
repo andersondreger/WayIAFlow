@@ -10,7 +10,7 @@ import AgentBuilder from './views/AgentBuilder.tsx';
 import Connections from './views/Connections.tsx';
 import Admin from './views/Admin.tsx';
 import { supabase } from './services/supabase.ts';
-import { X, ChevronRight, Zap, CheckCircle2, Info, Minimize2, Maximize2, Sparkles } from 'lucide-react';
+import { X, ChevronRight, Zap, CheckCircle2, Info, Minimize2, Maximize2, Sparkles, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.LANDING);
@@ -21,6 +21,11 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
+    // Timeout de segurança para evitar tela de loading infinita
+    const loadingTimeout = setTimeout(() => {
+      if (isLoading) setIsLoading(false);
+    }, 3500);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         setIsAuthenticated(true);
@@ -29,23 +34,30 @@ const App: React.FC = () => {
           id: session.user.id,
           name: session.user.user_metadata.full_name || 'Usuário WayFlow',
           email: session.user.email || '',
-          avatar: `https://picsum.photos/seed/${session.user.id}/100/100`,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(session.user.email || 'W')}&background=f59e0b&color=fff`,
           role: role as 'admin' | 'user',
           plan: role === 'admin' ? 'Enterprise' : 'Trial'
         });
+        
+        // Se estiver no login ou landing, vai para o dashboard
         if (currentView === AppView.LOGIN || currentView === AppView.LANDING) {
           setCurrentView(AppView.DASHBOARD);
         }
       } else {
         setIsAuthenticated(false);
         setUserProfile(null);
-        if (event === 'SIGNED_OUT') setCurrentView(AppView.LANDING);
+        if (event === 'SIGNED_OUT') {
+          setCurrentView(AppView.LANDING);
+        }
       }
       setIsLoading(false);
     });
 
-    return () => subscription.unsubscribe();
-  }, [currentView]);
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(loadingTimeout);
+    };
+  }, [currentView, isLoading]);
 
   const navigateTo = (view: AppView) => {
     if (view === AppView.ADMIN && userProfile?.role !== 'admin') {
@@ -60,9 +72,9 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-[#020617] flex flex-col items-center justify-center gap-6">
       <div className="relative">
         <div className="absolute inset-0 bg-orange-600/30 blur-3xl animate-pulse" />
-        <Sparkles className="text-orange-500 relative z-10 animate-spin-slow" size={64} />
+        <Loader2 className="text-orange-500 relative z-10 animate-spin" size={64} />
       </div>
-      <p className="text-xs font-black text-slate-500 uppercase tracking-[0.5em] animate-pulse">Sincronizando Rede Neural...</p>
+      <p className="text-xs font-black text-slate-500 uppercase tracking-[0.5em] animate-pulse">Iniciando Núcleo WayFlow...</p>
     </div>
   );
 
@@ -99,22 +111,14 @@ const App: React.FC = () => {
                   <GuideItem step={1} label="Conectar Evolution API" done={false} onClick={() => navigateTo(AppView.CONNECTIONS)} />
                   <GuideItem step={2} label="Vincular WhatsApp Web" done={false} onClick={() => navigateTo(AppView.CONNECTIONS)} />
                   <GuideItem step={3} label="Treinar Agente Neural" done={false} onClick={() => navigateTo(AppView.AGENT_BUILDER)} />
-                  <GuideItem step={4} label="Validar Recuperação" done={false} onClick={() => navigateTo(AppView.CHAT_MANAGER)} />
-               </div>
-
-               <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl mb-6">
-                  <div className="flex items-center gap-2 mb-1.5">
-                     <Info size={12} className="text-orange-500" />
-                     <span className="text-[9px] font-black text-orange-500 uppercase tracking-widest">Dica Master</span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 font-medium leading-tight">Vincule a <span className="text-white font-bold">Evolution API</span> primeiro para ativar a leitura neural.</p>
+                  <GuideItem step={4} label="Validar Atendimento" done={false} onClick={() => navigateTo(AppView.CHAT_MANAGER)} />
                </div>
 
                <button 
                  onClick={() => navigateTo(AppView.CONNECTIONS)} 
                  className="w-full py-3.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-orange-600/20 active:scale-95"
                >
-                 Iniciar Configuração
+                 Ir para Configurações
                </button>
             </div>
           )}
@@ -126,7 +130,7 @@ const App: React.FC = () => {
       {currentView === AppView.CHECKOUT && <Checkout onComplete={() => navigateTo(AppView.DASHBOARD)} onBack={() => navigateTo(AppView.LANDING)} />}
       
       {isAuthenticated && userProfile && (
-        <div className="animate-in fade-in duration-700">
+        <div className="animate-in fade-in duration-700 h-screen overflow-hidden">
           {currentView === AppView.DASHBOARD && <Dashboard onLogout={() => supabase.auth.signOut()} onNavigate={navigateTo} />}
           {currentView === AppView.CHAT_MANAGER && <ChatManager onNavigate={navigateTo} onLogout={() => supabase.auth.signOut()} />}
           {currentView === AppView.AGENT_BUILDER && <AgentBuilder onNavigate={navigateTo} onLogout={() => supabase.auth.signOut()} />}

@@ -59,26 +59,24 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             localStorage.setItem('wayflow_last_instance', firstInstance);
           }
         }
-      } catch (e) { console.error("Erro instâncias:", e); }
+      } catch (e) { console.error("Erro ao buscar instâncias:", e); }
     };
     fetchInstances();
   }, [config, selectedInstanceName]);
 
-  // Sincronização de leads ao trocar de instância
-  useEffect(() => {
-    if (selectedInstanceName) {
-      handleSync();
-    }
-  }, [selectedInstanceName]);
-
   const handleSync = useCallback(async () => {
-    if (!selectedInstanceName || !config.evoUrl || !config.evoKey) return;
+    if (!selectedInstanceName || !config.evoUrl || !config.evoKey) {
+       console.warn("Configuração incompleta para sincronização.");
+       return;
+    }
+    
     setIsSyncing(true);
+    console.log(`Iniciando sincronização para: ${selectedInstanceName}`);
     
     try {
       const baseUrl = config.evoUrl.trim().replace(/\/$/, "");
       
-      // Busca em 3 fontes diferentes para não perder nenhum contato
+      // Busca em múltiplas fontes para garantir que nenhum contato se perca
       const [chatsRes, contactsRes] = await Promise.all([
         fetch(`${baseUrl}/chat/fetchChats/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } }).catch(() => null),
         fetch(`${baseUrl}/contact/fetchContacts/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } }).catch(() => null)
@@ -87,12 +85,15 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       const chatsData = chatsRes ? await chatsRes.json() : [];
       const contactsData = contactsRes ? await contactsRes.json() : [];
 
+      console.log("Resposta Chats:", chatsData);
+      console.log("Resposta Contatos:", contactsData);
+
       const rawChats = Array.isArray(chatsData) ? chatsData : (chatsData.chats || chatsData.data || []);
       const rawContacts = Array.isArray(contactsData) ? contactsData : (contactsData.contacts || contactsData.data || []);
 
       const leadMap = new Map<string, KanbanLead>();
 
-      // Prioridade 1: Chats (quem já falou com você)
+      // 1. Processar quem já tem conversa ativa
       rawChats.forEach((chat: any) => {
         const jid = chat.id || chat.remoteJid || chat.jid;
         if (!jid || jid.includes('@g.us')) return; 
@@ -112,7 +113,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
       });
 
-      // Prioridade 2: Contatos (quem está na agenda mas talvez não tenha chat ativo)
+      // 2. Mesclar com a lista de contatos salvos
       rawContacts.forEach((contact: any) => {
         const jid = contact.id || contact.jid || contact.remoteJid;
         if (!jid || jid.includes('@g.us') || leadMap.has(jid)) return;
@@ -130,11 +131,24 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
       });
 
-      setLeads(Array.from(leadMap.values()));
+      const finalLeads = Array.from(leadMap.values());
+      setLeads(finalLeads);
+      console.log(`Total de leads carregados: ${finalLeads.length}`);
+      
     } catch (error) { 
-      console.error("Erro Sync:", error);
-    } finally { setIsSyncing(false); }
+      console.error("Erro fatal na sincronização:", error);
+      alert("Erro ao conectar com a Evolution API. Verifique sua URL e Key.");
+    } finally { 
+      setIsSyncing(false); 
+    }
   }, [selectedInstanceName, config]);
+
+  // Sincroniza automaticamente ao trocar de canal
+  useEffect(() => {
+    if (selectedInstanceName) {
+      handleSync();
+    }
+  }, [selectedInstanceName, handleSync]);
 
   const loadChat = async (lead: KanbanLead) => {
     setSelectedLead(lead);
@@ -156,7 +170,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                         m.message?.extendedTextMessage?.text || 
                         m.message?.imageMessage?.caption ||
                         m.message?.videoMessage?.caption ||
-                        (m.key?.fromMe ? "Você enviou um arquivo" : "Cliente enviou um arquivo");
+                        (m.key?.fromMe ? "Arquivo enviado" : "Arquivo recebido");
 
         return {
           id: m.key?.id || Math.random().toString(),
@@ -167,7 +181,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       }).reverse();
       
       setMessages(formatted);
-    } catch (e) { console.error("Erro mensagens:", e); }
+    } catch (e) { console.error("Erro ao carregar mensagens:", e); }
   };
 
   const sendMessage = async () => {
@@ -190,7 +204,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       }
     } catch (e) { 
       setNewMessage(text);
-      alert("Erro ao enviar mensagem.");
+      alert("Falha ao enviar. Verifique o status do canal.");
     } finally { setIsSending(false); }
   };
 
@@ -198,8 +212,8 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="h-full flex flex-col gap-4 animate-in fade-in max-h-[calc(100vh-140px)]">
         
-        {/* Toolbar */}
-        <div className="flex items-center justify-between gap-4 bg-[#03081a] border border-white/5 p-4 rounded-2xl shadow-xl shrink-0">
+        {/* Toolbar de Controle */}
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/5 p-4 rounded-2xl shadow-xl shrink-0">
           <div className="flex items-center gap-3">
              <div className="w-10 h-10 bg-orange-600/10 rounded-xl flex items-center justify-center text-orange-500 border border-orange-500/20">
                 <MessageCircle size={20} />
@@ -207,14 +221,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
              <h1 className="text-xl font-black text-white italic uppercase tracking-tighter">Atendimento Live.</h1>
           </div>
           
-          <div className="flex items-center gap-3 flex-1 justify-end max-w-2xl">
+          <div className="flex items-center gap-3 flex-1 justify-end w-full md:max-w-2xl">
              <select 
                value={selectedInstanceName}
                onChange={(e) => {
                  setSelectedInstanceName(e.target.value);
                  localStorage.setItem('wayflow_last_instance', e.target.value);
                }}
-               className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-[10px] text-white font-black uppercase tracking-widest outline-none cursor-pointer"
+               className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-[10px] text-white font-black uppercase tracking-widest outline-none cursor-pointer flex-1 md:flex-none"
              >
                {availableInstances.length === 0 && <option>Selecione um Canal</option>}
                {availableInstances.map(inst => (
@@ -225,21 +239,21 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
              <button 
               onClick={handleSync} 
               disabled={isSyncing || !selectedInstanceName} 
-              className="px-6 py-2 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg"
+              className="px-6 py-2.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg"
              >
                 {isSyncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 
-                Sincronizar
+                {isSyncing ? 'Sincronizando...' : 'Atualizar Conversas'}
              </button>
           </div>
         </div>
 
         <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
-          {/* Sidebar Leads */}
-          <div className="w-80 flex flex-col gap-3 overflow-y-auto custom-scrollbar pr-2 shrink-0">
+          {/* Listagem de Leads */}
+          <div className="w-full md:w-80 flex flex-col gap-3 overflow-y-auto custom-scrollbar pr-2 shrink-0 h-full">
             {leads.length === 0 && !isSyncing && (
               <div className="py-20 text-center opacity-30 flex flex-col items-center border border-dashed border-white/5 rounded-3xl">
                 <Users size={32} className="mb-4" />
-                <p className="text-[10px] font-black uppercase tracking-widest">Nenhum contato <br/> encontrado.</p>
+                <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Nenhum contato <br/> encontrado neste canal.</p>
               </div>
             )}
             {leads.map(lead => (
@@ -249,7 +263,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                 className={`p-4 rounded-2xl border transition-all cursor-pointer relative group ${selectedLead?.id === lead.id ? 'bg-orange-600/10 border-orange-500/30' : 'bg-[#03081a] border-white/5 hover:border-white/20'}`}
               >
                 <div className="flex items-center gap-3 mb-2">
-                   <img src={lead.avatar} className="w-10 h-10 rounded-xl border border-white/5" alt="" />
+                   <img src={lead.avatar} className="w-10 h-10 rounded-xl border border-white/5 bg-slate-900" alt="" />
                    <div className="flex-1 min-w-0">
                       <h4 className="text-white font-black text-[11px] truncate uppercase italic">{lead.name}</h4>
                       <p className="text-[9px] text-slate-600 font-bold">+{lead.phone}</p>
@@ -261,17 +275,17 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             ))}
           </div>
 
-          {/* Chat Principal */}
+          {/* Chat / Histórico */}
           {selectedLead ? (
-            <div className="flex-1 flex flex-col bg-[#03081a] border border-white/5 rounded-3xl overflow-hidden shadow-2xl animate-in slide-in-from-right-4">
+            <div className="hidden md:flex flex-1 flex flex-col bg-[#03081a] border border-white/5 rounded-3xl overflow-hidden shadow-2xl animate-in slide-in-from-right-4">
               <div className="p-4 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
                 <div className="flex items-center gap-4">
-                   <img src={selectedLead.avatar} className="w-10 h-10 rounded-xl border border-white/5" alt="" />
+                   <img src={selectedLead.avatar} className="w-10 h-10 rounded-xl border border-white/5 bg-slate-900" alt="" />
                    <div>
                       <h3 className="text-sm font-black text-white italic tracking-tight uppercase leading-none mb-1">{selectedLead.name}</h3>
                       <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Canal: {selectedInstanceName}</span>
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Ativo em {selectedInstanceName}</span>
                       </div>
                    </div>
                 </div>
@@ -285,7 +299,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center opacity-10">
                       <Loader2 size={32} className="animate-spin mb-2" />
-                      <p className="text-[10px] font-black uppercase tracking-widest">Buscando Mensagens...</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-center">Carregando histórico de <br/>mensagens do servidor...</p>
                    </div>
                  ) : messages.map(msg => (
                    <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2`}>
@@ -293,7 +307,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          <div className={`p-4 rounded-2xl text-[13px] font-medium leading-relaxed shadow-lg ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none'}`}>
                             {msg.content}
                          </div>
-                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-1.5 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'EU' : 'CLIENTE'}</p>
+                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-1.5 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'ENVIADO POR VOCÊ' : 'RESPOSTA DO CLIENTE'}</p>
                       </div>
                    </div>
                  ))}
@@ -306,7 +320,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="Responda o lead aqui..."
+                      placeholder="Escreva sua resposta para o lead..."
                       className="flex-1 bg-slate-950 border border-white/10 rounded-xl py-4 px-5 text-sm text-white outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
                     />
                     <button 
@@ -320,12 +334,12 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-3xl opacity-20 text-center p-10 bg-white/[0.01]">
+            <div className="hidden md:flex flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/5 rounded-3xl opacity-20 text-center p-10 bg-white/[0.01]">
                <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
                  <MessageCircle size={40} />
                </div>
-               <h3 className="text-xl font-black text-white italic uppercase tracking-tight mb-2">Central Neural.</h3>
-               <p className="text-[10px] font-bold uppercase tracking-widest max-w-xs">Selecione uma conversa ao lado para visualizar o histórico completo.</p>
+               <h3 className="text-xl font-black text-white italic uppercase tracking-tight mb-2">Selecione uma Conversa.</h3>
+               <p className="text-[10px] font-bold uppercase tracking-widest max-w-xs">Clique em um contato ao lado para visualizar o histórico neural de mensagens.</p>
             </div>
           )}
         </div>
