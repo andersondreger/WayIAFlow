@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, Smartphone, Lock, RefreshCw, Globe, Database, 
   CheckCircle2, Loader2, X, Trash2,
-  Check, QrCode, Network, Monitor, Zap, Scan, AlertTriangle, Info
+  Check, QrCode, Network, Monitor, Zap, Scan, AlertTriangle, Info,
+  RotateCcw
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView } from '../types.ts';
@@ -76,68 +77,91 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
     const headers = {
       'apikey': config.evoKey,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'Content-Type': 'application/json'
     };
 
-    console.log(`%c[WayFlow] Analisando Instância: ${instance.name}`, "color: #f59e0b; font-weight: bold;");
-
     try {
-      // 1. TENTA CONNECT (A v2 geralmente retorna o QR aqui se não estiver logado)
-      const connectRes = await fetch(`${baseUrl}/instance/connect/${instance.name}`, { headers });
-      const connectData = await connectRes.json();
+      // 1. CHECK DE STATUS ANTES DE TUDO
+      console.log(`[WayFlow] Verificando status atual de ${instance.name}...`);
+      const stateRes = await fetch(`${baseUrl}/instance/connectionState/${instance.name}`, { headers });
+      const stateData = await stateRes.json();
       
-      console.log("[WayFlow] Resposta da API:", connectData);
-
-      // VERIFICAÇÃO EXTREMA DE STATUS 'OPEN'
-      const rawDataString = JSON.stringify(connectData).toLowerCase();
-      const isConnected = rawDataString.includes('"open"') || 
-                          rawDataString.includes('"connected"') || 
-                          rawDataString.includes('"online"');
-
-      if (isConnected) {
-        console.log("%c[WayFlow] Instância identificada como ATIVA. Pulando QR...", "color: #10b981; font-weight: bold;");
+      if (stateData.instance?.state === 'open' || stateData.state === 'open') {
         setQrState('done');
-        updateInstanceStatus(instance.id, 'connected', connectData.instance?.ownerJid || 'Dispositivo Pareado');
+        updateInstanceStatus(instance.id, 'connected', stateData.instance?.ownerJid || 'Online');
         setTimeout(() => setShowQrPopUp(false), 2000);
         return;
       }
 
-      // EXTRATOR UNIVERSAL DE QR (Busca em todos os campos conhecidos da v2)
-      let qr = connectData.base64 || 
-               connectData.qrcode?.base64 || 
-               connectData.instance?.qrcode?.base64 ||
-               connectData.code || 
-               connectData.qrcode?.code;
+      // 2. FORÇAR CRIAÇÃO/RECONEXÃO (Resetando a lógica de QR da API)
+      console.log(`[WayFlow] Solicitando pareamento v2...`);
+      const connectRes = await fetch(`${baseUrl}/instance/connect/${instance.name}`, { headers });
+      const connectData = await connectRes.json();
+      
+      let qr = connectData.base64 || connectData.qrcode?.base64 || connectData.code;
 
-      // 2. SE NÃO HOUVER QR NO CONNECT, PODE SER QUE A INSTÂNCIA PRECISE SER REINICIADA OU CRIADA
+      // 3. SE NÃO VEIO, TENTA O ENDPOINT DE QR DEDICADO COM RETRY
       if (!qr) {
-        console.log("[WayFlow] QR não encontrado no connect. Tentando recuperar via status/qrcode...");
+        console.log("[WayFlow] QR não veio no connect. Tentando endpoint dedicado...");
+        await new Promise(r => setTimeout(r, 1000)); // Pequeno delay para a API processar
+        const qrRes = await fetch(`${baseUrl}/instance/qrcode/${instance.name}`, { headers });
+        const qrData = await qrRes.json();
+        qr = qrData.base64 || qrData.qrcode?.base64 || qrData.code || qrData.qrcode?.code;
+      }
+
+      // 4. ÚLTIMO RECURSO: TENTAR RE-CRIAR A INSTÂNCIA COM QRCODE ATIVO
+      if (!qr) {
+        console.log("[WayFlow] Tentando recriar instância para forçar QR...");
         const createRes = await fetch(`${baseUrl}/instance/create`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ 
-            instanceName: instance.name, 
+          body: JSON.stringify({
+            instanceName: instance.name,
             qrcode: true,
             integration: "WHATSAPP-BAILEYS"
           })
         });
-
         const createData = await createRes.json();
-        qr = createData.qrcode?.base64 || createData.base64 || createData.code || createData.instance?.qrcode?.base64;
+        qr = createData.qrcode?.base64 || createData.base64 || createData.instance?.qrcode?.base64;
       }
 
       if (qr) {
         processQrData(qr);
       } else {
-        // Se a API não der erro mas não enviar QR, e não detectamos 'open', vamos sugerir o Logout para resetar o cache da Evolution
-        throw new Error("O servidor Evolution reconhece a instância, mas não liberou o QR Code. Tente reiniciar a instância ou verifique se ela já está aberta em outra aba.");
+        throw new Error("A API Evolution não enviou o QR Code. Tente usar o botão 'Hard Reset' abaixo para limpar a sessão no servidor.");
       }
 
     } catch (err: any) {
       console.error("[WayFlow Error]", err);
       setQrState('error');
-      setErrorMessage(err.message || "Falha na comunicação.");
+      setErrorMessage(err.message || "Falha ao gerar QR Code.");
+    }
+  };
+
+  const hardResetInstance = async (instance: Instance) => {
+    setQrState('generating');
+    let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
+    const headers = { 'apikey': config.evoKey };
+
+    try {
+      // Deleta e recria
+      await fetch(`${baseUrl}/instance/delete/${instance.name}`, { method: 'DELETE', headers }).catch(() => {});
+      await new Promise(r => setTimeout(r, 1000));
+      
+      const createRes = await fetch(`${baseUrl}/instance/create`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName: instance.name, qrcode: true })
+      });
+      
+      const createData = await createRes.json();
+      const qr = createData.qrcode?.base64 || createData.base64;
+      
+      if (qr) processQrData(qr);
+      else fetchQrCode(instance);
+    } catch (e) {
+      setErrorMessage("Erro no Hard Reset. Verifique se a Global Key está correta.");
+      setQrState('error');
     }
   };
 
@@ -149,7 +173,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
   const processQrData = (qr: string) => {
     let finalUrl = "";
-    if (qr.includes('base64')) {
+    if (qr.length > 100) {
       const cleanBase64 = qr.replace(/\s/g, "").replace(/^data:image\/png;base64,/, "");
       finalUrl = `data:image/png;base64,${cleanBase64}`;
     } else {
@@ -307,13 +331,16 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          {qrState === 'generating' ? (
                            <div className="flex flex-col items-center gap-6">
                               <Loader2 size={64} className="text-orange-500 animate-spin" strokeWidth={3} />
-                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Capturando Handshake...</p>
+                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Sincronizando com API v2...</p>
                            </div>
                          ) : qrState === 'error' ? (
                            <div className="flex flex-col items-center gap-6 text-center px-4">
                               <AlertTriangle size={64} className="text-red-500 animate-bounce" />
                               <p className="font-outfit text-xs font-black text-red-600 uppercase tracking-tight leading-tight">{errorMessage}</p>
-                              <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="mt-6 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all active:scale-95"><RefreshCw size={14} /> Tentar Novamente</button>
+                              <div className="flex flex-col gap-3 mt-8 w-full">
+                                <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/5"><RefreshCw size={14} /> Tentar Novamente</button>
+                                <button onClick={() => activeInstance && hardResetInstance(activeInstance)} className="w-full py-4 bg-orange-600 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-orange-600/20"><RotateCcw size={14} /> Hard Reset (Limpar API)</button>
+                              </div>
                            </div>
                          ) : (
                            <div className="relative overflow-hidden rounded-3xl">
@@ -353,7 +380,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                           onClick={() => activeInstance && fetchQrCode(activeInstance)}
                           className="px-8 py-4 bg-white/5 hover:bg-white/10 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-white/5 transition-all flex items-center gap-3"
                        >
-                          <RefreshCw size={14} /> Atualizar Código
+                          <RefreshCw size={14} /> Novo Código
                        </button>
                      )}
                      
