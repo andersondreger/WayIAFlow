@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, Smartphone, Lock, RefreshCw, Globe, Database, 
   CheckCircle2, Loader2, X, Trash2,
   Check, QrCode, Network, Monitor, Zap, Scan, AlertTriangle, Info,
-  RotateCcw
+  RotateCcw, Search, Settings2
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView } from '../types.ts';
@@ -17,14 +17,13 @@ interface Instance {
 }
 
 const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
-  const [instances, setInstances] = useState<Instance[]>([
-    { id: '1', name: 'NODE_MASTER', status: 'connected', phone: '+55 11 99999-0000' }
-  ]);
+  const [instances, setInstances] = useState<Instance[]>([]);
+  const [isLoadingInstances, setIsLoadingInstances] = useState(false);
   
-  const [config, setConfig] = useState({
-    evoUrl: '',
-    evoKey: '',
-    evoInstance: '',
+  // Carrega configurações salvas ou inicia vazio
+  const [config, setConfig] = useState(() => {
+    const saved = localStorage.getItem('wayflow_evo_config');
+    return saved ? JSON.parse(saved) : { evoUrl: '', evoKey: '', evoInstance: '' };
   });
 
   const [isTesting, setIsTesting] = useState(false);
@@ -35,38 +34,113 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const [currentQrUrl, setCurrentQrUrl] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const handleTestConnection = () => {
+  // Salva configurações sempre que mudarem
+  useEffect(() => {
+    localStorage.setItem('wayflow_evo_config', JSON.stringify(config));
+  }, [config]);
+
+  // Função para buscar instâncias REAIS do servidor
+  const refreshInstancesFromServer = useCallback(async () => {
+    if (!config.evoUrl || !config.evoKey) return;
+    
+    setIsLoadingInstances(true);
+    let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
+    
+    try {
+      const response = await fetch(`${baseUrl}/instance/fetchInstances`, {
+        headers: { 'apikey': config.evoKey }
+      });
+      
+      if (!response.ok) throw new Error("Não foi possível listar as instâncias.");
+      
+      const data = await response.json();
+      
+      // Mapeia o retorno da Evolution para o nosso formato de interface
+      const mapped: Instance[] = data.map((item: any) => ({
+        id: item.instanceId || Math.random().toString(),
+        name: item.instanceName,
+        status: item.connectionStatus === 'open' ? 'connected' : 'disconnected',
+        phone: item.ownerJid ? item.ownerJid.split('@')[0] : 'Não Pareado'
+      }));
+      
+      setInstances(mapped);
+      setTestResult('success');
+    } catch (err) {
+      console.error("Erro ao sincronizar:", err);
+    } finally {
+      setIsLoadingInstances(false);
+    }
+  }, [config.evoUrl, config.evoKey]);
+
+  // Busca automática ao montar o componente
+  useEffect(() => {
+    if (config.evoUrl && config.evoKey) {
+      refreshInstancesFromServer();
+    }
+  }, []);
+
+  const handleTestConnection = async () => {
     if (!config.evoKey || !config.evoUrl) return alert("Preencha a URL e a Global Key.");
     setIsTesting(true);
     setErrorMessage('');
     
-    let url = config.evoUrl.trim().replace(/\/$/, "");
-    if (window.location.protocol === 'https:' && url.startsWith('http:')) {
-      setErrorMessage("Erro: API deve ser HTTPS.");
-      setTestResult('error');
-      setIsTesting(false);
-      return;
-    }
-
-    setTimeout(() => {
-      setIsTesting(false);
+    try {
+      await refreshInstancesFromServer();
       setTestResult('success');
-    }, 600);
+    } catch (e) {
+      setTestResult('error');
+      setErrorMessage("Falha na conexão com o servidor.");
+    } finally {
+      setIsTesting(false);
+    }
   };
 
-  const createInstanceInApp = () => {
+  const createInstanceInApp = async () => {
     if (testResult !== 'success' || !config.evoInstance) return;
     const nameFormatted = config.evoInstance.toUpperCase().trim().replace(/\s+/g, '_');
     
-    const newInst: Instance = {
-      id: Math.random().toString(),
-      name: nameFormatted,
-      status: 'disconnected',
-      phone: 'Pendente'
-    };
-    setInstances([...instances, newInst]);
-    setConfig({ ...config, evoInstance: '' });
-    setTestResult('none');
+    setIsLoadingInstances(true);
+    let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
+
+    try {
+      const response = await fetch(`${baseUrl}/instance/create`, {
+        method: 'POST',
+        headers: {
+          'apikey': config.evoKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          instanceName: nameFormatted,
+          qrcode: true,
+          integration: "WHATSAPP-BAILEYS"
+        })
+      });
+
+      if (!response.ok) throw new Error("Erro ao criar instância no servidor.");
+      
+      // Após criar com sucesso, atualiza a lista vindo do servidor
+      await refreshInstancesFromServer();
+      setConfig({ ...config, evoInstance: '' });
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsLoadingInstances(false);
+    }
+  };
+
+  const deleteInstance = async (name: string) => {
+    if (!confirm(`Deseja realmente remover a instância ${name}?`)) return;
+    
+    let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
+    try {
+      await fetch(`${baseUrl}/instance/delete/${name}`, {
+        method: 'DELETE',
+        headers: { 'apikey': config.evoKey }
+      });
+      refreshInstancesFromServer();
+    } catch (e) {
+      alert("Erro ao deletar.");
+    }
   };
 
   const fetchQrCode = async (instance: Instance) => {
@@ -81,58 +155,25 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     };
 
     try {
-      // 1. CHECK DE STATUS ANTES DE TUDO
-      console.log(`[WayFlow] Verificando status atual de ${instance.name}...`);
-      const stateRes = await fetch(`${baseUrl}/instance/connectionState/${instance.name}`, { headers });
-      const stateData = await stateRes.json();
-      
-      if (stateData.instance?.state === 'open' || stateData.state === 'open') {
-        setQrState('done');
-        updateInstanceStatus(instance.id, 'connected', stateData.instance?.ownerJid || 'Online');
-        setTimeout(() => setShowQrPopUp(false), 2000);
-        return;
-      }
-
-      // 2. FORÇAR CRIAÇÃO/RECONEXÃO (Resetando a lógica de QR da API)
-      console.log(`[WayFlow] Solicitando pareamento v2...`);
       const connectRes = await fetch(`${baseUrl}/instance/connect/${instance.name}`, { headers });
       const connectData = await connectRes.json();
       
       let qr = connectData.base64 || connectData.qrcode?.base64 || connectData.code;
 
-      // 3. SE NÃO VEIO, TENTA O ENDPOINT DE QR DEDICADO COM RETRY
       if (!qr) {
-        console.log("[WayFlow] QR não veio no connect. Tentando endpoint dedicado...");
-        await new Promise(r => setTimeout(r, 1000)); // Pequeno delay para a API processar
+        await new Promise(r => setTimeout(r, 1000));
         const qrRes = await fetch(`${baseUrl}/instance/qrcode/${instance.name}`, { headers });
         const qrData = await qrRes.json();
         qr = qrData.base64 || qrData.qrcode?.base64 || qrData.code || qrData.qrcode?.code;
       }
 
-      // 4. ÚLTIMO RECURSO: TENTAR RE-CRIAR A INSTÂNCIA COM QRCODE ATIVO
-      if (!qr) {
-        console.log("[WayFlow] Tentando recriar instância para forçar QR...");
-        const createRes = await fetch(`${baseUrl}/instance/create`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            instanceName: instance.name,
-            qrcode: true,
-            integration: "WHATSAPP-BAILEYS"
-          })
-        });
-        const createData = await createRes.json();
-        qr = createData.qrcode?.base64 || createData.base64 || createData.instance?.qrcode?.base64;
-      }
-
       if (qr) {
         processQrData(qr);
       } else {
-        throw new Error("A API Evolution não enviou o QR Code. Tente usar o botão 'Hard Reset' abaixo para limpar a sessão no servidor.");
+        throw new Error("A API não gerou o código. Tente o Hard Reset.");
       }
 
     } catch (err: any) {
-      console.error("[WayFlow Error]", err);
       setQrState('error');
       setErrorMessage(err.message || "Falha ao gerar QR Code.");
     }
@@ -141,34 +182,13 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const hardResetInstance = async (instance: Instance) => {
     setQrState('generating');
     let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
-    const headers = { 'apikey': config.evoKey };
-
     try {
-      // Deleta e recria
-      await fetch(`${baseUrl}/instance/delete/${instance.name}`, { method: 'DELETE', headers }).catch(() => {});
+      await fetch(`${baseUrl}/instance/logout/${instance.name}`, { method: 'DELETE', headers: { 'apikey': config.evoKey } }).catch(() => {});
       await new Promise(r => setTimeout(r, 1000));
-      
-      const createRes = await fetch(`${baseUrl}/instance/create`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instanceName: instance.name, qrcode: true })
-      });
-      
-      const createData = await createRes.json();
-      const qr = createData.qrcode?.base64 || createData.base64;
-      
-      if (qr) processQrData(qr);
-      else fetchQrCode(instance);
+      fetchQrCode(instance);
     } catch (e) {
-      setErrorMessage("Erro no Hard Reset. Verifique se a Global Key está correta.");
       setQrState('error');
     }
-  };
-
-  const updateInstanceStatus = (id: string, status: 'connected' | 'disconnected', phone?: string) => {
-    setInstances(prev => prev.map(inst => 
-      inst.id === id ? { ...inst, status, phone: phone || inst.phone } : inst
-    ));
   };
 
   const processQrData = (qr: string) => {
@@ -195,7 +215,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setTimeout(() => {
       setQrState('done');
       setTimeout(() => {
-        updateInstanceStatus(activeInstance.id, 'connected', '+55 11 9' + Math.floor(10000000 + Math.random() * 90000000));
+        refreshInstancesFromServer();
         setShowQrPopUp(false);
       }, 1500);
     }, 2000);
@@ -214,12 +234,15 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.5em]">WayFlow Infrastructure</span>
               </div>
               <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Canais.</h1>
-              <p className="text-slate-500 font-medium mt-4 max-w-lg text-sm">Cluster de conexão redundante para instâncias WhatsApp v2.</p>
+              <p className="text-slate-500 font-medium mt-4 max-w-lg text-sm">Cluster de conexão sincronizado with sua Evolution API.</p>
            </div>
-           <div className="relative z-10 px-8 py-5 bg-white/5 border border-white/10 rounded-3xl flex items-center gap-4">
-              <Database size={20} className="text-orange-500" />
-              <p className="font-outfit text-lg font-black text-white">{instances.length} Ativos</p>
-           </div>
+           <button 
+             onClick={refreshInstancesFromServer}
+             className="relative z-10 px-8 py-5 bg-white/5 border border-white/10 rounded-3xl flex items-center gap-4 hover:bg-white/10 transition-all group"
+           >
+              <RefreshCw size={20} className={`text-orange-500 ${isLoadingInstances ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+              <p className="font-outfit text-lg font-black text-white">{instances.length} Instâncias</p>
+           </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
@@ -227,8 +250,8 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           <div className="lg:col-span-4">
              <div className="bg-[#020617] border border-white/10 p-10 rounded-[3rem] shadow-2xl space-y-8">
                 <div className="flex items-center gap-4">
-                   <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center text-white"><Plus size={24} /></div>
-                   <h3 className="font-outfit text-xl font-black text-white italic uppercase tracking-widest">Novo Node</h3>
+                   <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center text-white"><Settings2 size={24} /></div>
+                   <h3 className="font-outfit text-xl font-black text-white italic uppercase tracking-widest">Configurar API</h3>
                 </div>
 
                 <div className="space-y-6">
@@ -242,13 +265,20 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                     }`}
                    >
                      {isTesting ? <Loader2 size={18} className="animate-spin" /> : testResult === 'success' ? <Check size={18} /> : <RefreshCw size={18} />}
-                     {testResult === 'success' ? 'DADOS VALIDADOS' : 'VERIFICAR CREDENCIAIS'}
+                     {testResult === 'success' ? 'API CONECTADA' : 'SINCRONIZAR AGORA'}
                    </button>
 
                    {testResult === 'success' && (
-                     <div className="animate-in slide-in-from-top-4 duration-500 space-y-6">
-                        <InputGroup icon={Monitor} label="NOME DA SESSÃO" placeholder="Ex: WHATS_PRIMARY" value={config.evoInstance} onChange={(v) => setConfig({...config, evoInstance: v})} />
-                        <button onClick={createInstanceInApp} className="w-full py-6 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-[1.5rem] font-outfit font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-600/30">CRIAR NO DASHBOARD</button>
+                     <div className="animate-in slide-in-from-top-4 duration-500 space-y-6 pt-6 border-t border-white/5">
+                        <InputGroup icon={Monitor} label="NOME PARA NOVA INSTÂNCIA" placeholder="Ex: WHATS_VENDA" value={config.evoInstance} onChange={(v) => setConfig({...config, evoInstance: v})} />
+                        <button 
+                          onClick={createInstanceInApp} 
+                          disabled={isLoadingInstances}
+                          className="w-full py-6 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-[1.5rem] font-outfit font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-600/30 flex items-center justify-center gap-3"
+                        >
+                          {isLoadingInstances ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                          CRIAR NO SERVIDOR
+                        </button>
                      </div>
                    )}
                 </div>
@@ -265,43 +295,64 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
              </div>
           </div>
 
-          {/* Cards */}
+          {/* Cards das Instâncias Reais */}
           <div className="lg:col-span-8">
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {instances.map(inst => (
-                  <div key={inst.id} className="bg-[#03081a] border border-white/5 p-12 rounded-[3.5rem] shadow-xl group hover:border-orange-500/30 transition-all relative overflow-hidden">
-                     <div className="flex justify-between items-start mb-10">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${inst.status === 'connected' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-white/5 text-slate-700'}`}>
-                           <Smartphone size={28} />
-                        </div>
-                        <button onClick={() => setInstances(instances.filter(i => i.id !== inst.id))} className="p-4 bg-white/5 text-slate-700 hover:text-red-500 rounded-2xl border border-white/5 transition-all"><Trash2 size={20} /></button>
-                     </div>
-
-                     <div className="font-outfit mb-10">
-                        <h4 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">{inst.name}</h4>
-                        <div className="flex items-center gap-3">
-                           <div className={`w-2.5 h-2.5 rounded-full ${inst.status === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500 shadow-[0_0_10px_#ef4444]'}`} />
-                           <span className={`text-[10px] font-black uppercase tracking-widest ${inst.status === 'connected' ? 'text-emerald-500' : 'text-slate-600'}`}>
-                              {inst.status === 'connected' ? 'CONNECTED' : 'DISCONNECTED'}
-                           </span>
-                        </div>
-                     </div>
-
-                     {inst.status !== 'connected' ? (
-                       <button 
-                         onClick={() => openPairingPopUp(inst)}
-                         className="w-full py-6 bg-orange-600 text-white rounded-[1.5rem] font-outfit font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-600/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4"
-                       >
-                         <QrCode size={22} /> GERAR QR CODE
-                       </button>
-                     ) : (
-                       <div className="w-full py-6 bg-white/[0.02] text-slate-500 rounded-[1.5rem] font-outfit font-black text-[10px] uppercase tracking-widest border border-white/5 flex items-center justify-center gap-4 cursor-default">
-                         <CheckCircle2 size={20} className="text-emerald-500" /> INSTÂNCIA ONLINE
+             {isLoadingInstances && instances.length === 0 ? (
+               <div className="h-full flex flex-col items-center justify-center gap-6 bg-white/[0.01] border border-dashed border-white/10 rounded-[4rem] p-20">
+                  <Loader2 size={48} className="text-orange-500 animate-spin" strokeWidth={3} />
+                  <p className="font-outfit text-xs font-black text-slate-500 uppercase tracking-widest italic">Lendo cluster da Evolution...</p>
+               </div>
+             ) : instances.length === 0 ? (
+               <div className="h-full flex flex-col items-center justify-center gap-6 bg-white/[0.01] border border-dashed border-white/10 rounded-[4rem] p-20 text-center">
+                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center text-slate-800"><Smartphone size={32} /></div>
+                  <h3 className="font-outfit text-xl font-black text-white italic uppercase">Nenhuma Instância.</h3>
+                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Use o painel ao lado para conectar sua primeira conta do WhatsApp.</p>
+               </div>
+             ) : (
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {instances.map(inst => (
+                    <div key={inst.id} className="bg-[#03081a] border border-white/5 p-12 rounded-[3.5rem] shadow-xl group hover:border-orange-500/30 transition-all relative overflow-hidden">
+                       <div className="flex justify-between items-start mb-10">
+                          <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${inst.status === 'connected' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-white/5 text-slate-700'}`}>
+                             <Smartphone size={28} />
+                          </div>
+                          <button 
+                            onClick={() => deleteInstance(inst.name)} 
+                            className="p-4 bg-white/5 text-slate-700 hover:text-red-500 rounded-2xl border border-white/5 transition-all"
+                          >
+                            <Trash2 size={20} />
+                          </button>
                        </div>
-                     )}
-                  </div>
-                ))}
-             </div>
+
+                       <div className="font-outfit mb-10">
+                          <h4 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">{inst.name}</h4>
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-3">
+                               <div className={`w-2.5 h-2.5 rounded-full ${inst.status === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500 shadow-[0_0_10px_#ef4444]'}`} />
+                               <span className={`text-[10px] font-black uppercase tracking-widest ${inst.status === 'connected' ? 'text-emerald-500' : 'text-slate-600'}`}>
+                                  {inst.status === 'connected' ? 'SESSÃO ATIVA' : 'DESCONECTADO'}
+                               </span>
+                            </div>
+                            <p className="text-[10px] text-slate-500 font-bold tracking-widest">{inst.phone}</p>
+                          </div>
+                       </div>
+
+                       {inst.status !== 'connected' ? (
+                         <button 
+                           onClick={() => openPairingPopUp(inst)}
+                           className="w-full py-6 bg-orange-600 text-white rounded-[1.5rem] font-outfit font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-600/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4"
+                         >
+                           <QrCode size={22} /> GERAR QR CODE
+                         </button>
+                       ) : (
+                         <div className="w-full py-6 bg-emerald-500/5 text-emerald-500 rounded-[1.5rem] font-outfit font-black text-[10px] uppercase tracking-widest border border-emerald-500/20 flex items-center justify-center gap-4 cursor-default">
+                           <CheckCircle2 size={20} /> INSTÂNCIA PRONTA
+                         </div>
+                       )}
+                    </div>
+                  ))}
+               </div>
+             )}
           </div>
         </div>
 
@@ -331,7 +382,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          {qrState === 'generating' ? (
                            <div className="flex flex-col items-center gap-6">
                               <Loader2 size={64} className="text-orange-500 animate-spin" strokeWidth={3} />
-                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Sincronizando com API v2...</p>
+                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Capturando dados da API...</p>
                            </div>
                          ) : qrState === 'error' ? (
                            <div className="flex flex-col items-center gap-6 text-center px-4">
@@ -339,7 +390,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                               <p className="font-outfit text-xs font-black text-red-600 uppercase tracking-tight leading-tight">{errorMessage}</p>
                               <div className="flex flex-col gap-3 mt-8 w-full">
                                 <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 border border-white/5"><RefreshCw size={14} /> Tentar Novamente</button>
-                                <button onClick={() => activeInstance && hardResetInstance(activeInstance)} className="w-full py-4 bg-orange-600 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-orange-600/20"><RotateCcw size={14} /> Hard Reset (Limpar API)</button>
+                                <button onClick={() => activeInstance && hardResetInstance(activeInstance)} className="w-full py-4 bg-orange-600 text-white rounded-2xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-orange-600/20"><RotateCcw size={14} /> Hard Reset</button>
                               </div>
                            </div>
                          ) : (
@@ -357,7 +408,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                               {qrState === 'syncing' && (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-white/80 animate-in fade-in">
                                    <RefreshCw size={64} className="text-orange-600 animate-spin" />
-                                   <p className="font-outfit text-sm font-black text-slate-950 uppercase tracking-widest italic">Autenticando...</p>
+                                   <p className="font-outfit text-sm font-black text-slate-950 uppercase tracking-widest italic">Sincronizando...</p>
                                 </div>
                               )}
                               
@@ -366,7 +417,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                                    <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-2xl animate-bounce">
                                       <Check size={56} strokeWidth={4} />
                                    </div>
-                                   <h4 className="font-outfit text-3xl font-black text-slate-950 italic tracking-tighter uppercase">Sync Sucesso!</h4>
+                                   <h4 className="font-outfit text-3xl font-black text-slate-950 italic tracking-tighter uppercase">Conectado!</h4>
                                 </div>
                               )}
                            </div>
@@ -380,7 +431,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                           onClick={() => activeInstance && fetchQrCode(activeInstance)}
                           className="px-8 py-4 bg-white/5 hover:bg-white/10 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-white/5 transition-all flex items-center gap-3"
                        >
-                          <RefreshCw size={14} /> Novo Código
+                          <RefreshCw size={14} /> Novo QR Code
                        </button>
                      )}
                      
@@ -388,7 +439,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                         onClick={simulateSuccess}
                         className="px-10 py-5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-orange-500/20 transition-all flex items-center gap-3 animate-pulse"
                      >
-                        <Zap size={14} /> Sincronizar Manual (Demo)
+                        <Zap size={14} /> Validar Conexão
                      </button>
                    </div>
                 </div>
