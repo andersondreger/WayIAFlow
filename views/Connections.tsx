@@ -39,13 +39,19 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setIsTesting(true);
     setErrorMessage('');
     
-    const cleanUrl = config.evoUrl.replace(/\/$/, "");
+    // Sanitização básica
+    let url = config.evoUrl.trim().replace(/\/$/, "");
     
-    if (window.location.protocol === 'https:' && cleanUrl.startsWith('http:')) {
-      setErrorMessage("Bloqueio de Segurança: Cloudflare exige HTTPS. Use https:// na sua API.");
+    if (window.location.protocol === 'https:' && url.startsWith('http:')) {
+      setErrorMessage("Erro de Segurança: Sua API precisa ser HTTPS para funcionar neste painel.");
       setTestResult('error');
       setIsTesting(false);
       return;
+    }
+
+    // Se o usuário não colocou v2, avisar (mas o fetch tentará corrigir)
+    if (!url.toLowerCase().endsWith('/v2') && !url.toLowerCase().endsWith('/v1')) {
+       console.log("URL sem versão detectada. O sistema tentará injetar /v2 no fetch.");
     }
 
     setTimeout(() => {
@@ -80,58 +86,79 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       'Accept': 'application/json'
     };
 
-    const tryFetch = async (baseUrl: string) => {
-      const cleanUrl = baseUrl.replace(/\/$/, "");
+    const tryRoute = async (baseUrl: string) => {
+      // Limpa a URL e garante que não tenha barra dupla ou sufixo v2 duplicado
+      let cleanUrl = baseUrl.trim().replace(/\/$/, "");
       
-      // 1. Tenta Criar
-      const createRes = await fetch(`${cleanUrl}/instance/create`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ instanceName: instance.name, qrcode: true })
-      });
+      console.log(`Tentando conexão em: ${cleanUrl}`);
 
-      if (createRes.status === 404) return { status: 404 };
+      try {
+        // 1. Tenta Criar/Consultar Instância (POST /instance/create)
+        const createRes = await fetch(`${cleanUrl}/instance/create`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ 
+            instanceName: instance.name, 
+            token: "",
+            qrcode: true,
+            integration: "WHATSAPP-BAILEYS"
+          })
+        });
 
-      const createData = await createRes.json();
-      let qr = createData.qrcode?.base64 || createData.base64;
+        if (createRes.status === 404) return { status: 404, qr: null };
 
-      // 2. Se não veio no create, tenta connect
-      if (!qr && createRes.ok) {
-        const connectRes = await fetch(`${cleanUrl}/instance/connect/${instance.name}`, { headers });
-        const connectData = await connectRes.json();
-        qr = connectData.base64 || connectData.code;
+        const createData = await createRes.json();
+        let qr = createData.qrcode?.base64 || createData.base64 || createData.code;
+
+        // 2. Se não veio QR no create (instância já existe), tenta Connect (GET /instance/connect)
+        if (!qr) {
+          console.log("Instância existente ou sem QR no create. Tentando rota /connect...");
+          const connectRes = await fetch(`${cleanUrl}/instance/connect/${instance.name}`, { 
+            method: 'GET',
+            headers 
+          });
+          
+          if (connectRes.ok) {
+            const connectData = await connectRes.json();
+            qr = connectData.base64 || connectData.code || connectData.qrcode?.base64;
+          }
+        }
+
+        return { status: createRes.status, qr };
+      } catch (e) {
+        return { status: 500, error: e };
       }
-
-      return { status: createRes.status, qr };
     };
 
     try {
-      let result = await tryFetch(config.evoUrl);
+      let finalUrl = config.evoUrl.trim().replace(/\/$/, "");
+      let result = await tryRoute(finalUrl);
 
-      // LÓGICA DE AUTO-CORREÇÃO DE URL (Se der 404, tenta adicionar /v2)
-      if (result.status === 404 && !config.evoUrl.includes('/v2')) {
-        console.log("Detectado 404. Tentando auto-correção para /v2...");
-        result = await tryFetch(`${config.evoUrl.replace(/\/$/, "")}/v2`);
+      // AUTO-CORREÇÃO: Se deu 404 e o usuário não tinha colocado /v2, tenta adicionar agora
+      if (result.status === 404 && !finalUrl.toLowerCase().endsWith('/v2')) {
+        console.log("Rota não encontrada. Tentando com sufixo /v2...");
+        result = await tryRoute(`${finalUrl}/v2`);
       }
 
       if (result.qr) {
-        let finalUrl = "";
+        let qrDisplayUrl = "";
         if (typeof result.qr === 'string' && result.qr.includes('base64')) {
           const cleanBase64 = result.qr.replace(/\s/g, "").replace(/^data:image\/png;base64,/, "");
-          finalUrl = `data:image/png;base64,${cleanBase64}`;
+          qrDisplayUrl = `data:image/png;base64,${cleanBase64}`;
         } else {
-          finalUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=${encodeURIComponent(result.qr)}`;
+          // Se for código de texto, gera imagem do QR
+          qrDisplayUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=${encodeURIComponent(result.qr)}`;
         }
-        setCurrentQrUrl(finalUrl);
+        setCurrentQrUrl(qrDisplayUrl);
         setQrState('waiting');
       } else {
-        throw new Error("Não foi possível localizar as rotas da API. Verifique se a URL e a API Key estão corretas.");
+        throw new Error(result.status === 404 ? "Erro 404: A API não respondeu nesta URL. Verifique se o domínio está correto." : "A API não retornou um QR Code válido.");
       }
 
     } catch (err: any) {
-      console.error("Fetch Error:", err);
+      console.error("Fetch Final Error:", err);
       setQrState('error');
-      setErrorMessage(err.message || "Erro de conexão com a API.");
+      setErrorMessage(err.message || "Erro de comunicação com o servidor.");
     }
   };
 
@@ -185,7 +212,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                 </div>
 
                 <div className="space-y-6">
-                   <InputGroup icon={Globe} label="URL DO SERVIDOR" placeholder="https://api.seudominio.com" value={config.evoUrl} onChange={(v) => setConfig({...config, evoUrl: v})} />
+                   <InputGroup icon={Globe} label="URL DO SERVIDOR" placeholder="https://api.seudominio.com/v2" value={config.evoUrl} onChange={(v) => setConfig({...config, evoUrl: v})} />
                    <InputGroup icon={Lock} label="GLOBAL API KEY" placeholder="apikey do seu .env" type="password" value={config.evoKey} onChange={(v) => setConfig({...config, evoKey: v})} />
                    
                    <button 
@@ -212,13 +239,6 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                      <p className="text-[10px] text-red-400 font-bold leading-relaxed">{errorMessage}</p>
                   </div>
                 )}
-
-                <div className="p-6 bg-blue-500/5 border border-blue-500/20 rounded-3xl flex gap-4">
-                   <Info className="text-blue-500 shrink-0" size={20} />
-                   <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-                     DICA: Se sua URL não funcionar, tente adicionar <span className="text-white">/v2</span> no final dela manualmente.
-                   </p>
-                </div>
              </div>
           </div>
 
@@ -294,7 +314,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                            <div className="flex flex-col items-center gap-6 text-center px-4">
                               <AlertTriangle size={64} className="text-red-500 animate-bounce" />
                               <p className="font-outfit text-sm font-black text-red-600 uppercase tracking-tight leading-tight">{errorMessage}</p>
-                              <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="mt-6 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2"><RefreshCw size={14} /> Tentar Novamente</button>
+                              <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="mt-6 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all active:scale-95"><RefreshCw size={14} /> Tentar Novamente</button>
                            </div>
                          ) : (
                            <div className="relative overflow-hidden rounded-3xl">
