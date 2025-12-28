@@ -17,10 +17,15 @@ interface Instance {
 }
 
 const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
-  const [instances, setInstances] = useState<Instance[]>([]);
+  // 1. PERSISTÊNCIA: Inicializa as instâncias a partir do cache do LocalStorage
+  const [instances, setInstances] = useState<Instance[]>(() => {
+    const cached = localStorage.getItem('wayflow_instances_cache');
+    return cached ? JSON.parse(cached) : [];
+  });
+
   const [isLoadingInstances, setIsLoadingInstances] = useState(false);
   
-  // Carrega configurações salvas ou inicia vazio
+  // 2. CONFIG: Carrega configurações salvas da API
   const [config, setConfig] = useState(() => {
     const saved = localStorage.getItem('wayflow_evo_config');
     return saved ? JSON.parse(saved) : { evoUrl: '', evoKey: '', evoInstance: '' };
@@ -39,11 +44,16 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     localStorage.setItem('wayflow_evo_config', JSON.stringify(config));
   }, [config]);
 
+  // Salva a lista de instâncias no cache sempre que for atualizada
+  useEffect(() => {
+    localStorage.setItem('wayflow_instances_cache', JSON.stringify(instances));
+  }, [instances]);
+
   // Função para buscar instâncias REAIS do servidor
-  const refreshInstancesFromServer = useCallback(async () => {
+  const refreshInstancesFromServer = useCallback(async (isAuto = false) => {
     if (!config.evoUrl || !config.evoKey) return;
     
-    setIsLoadingInstances(true);
+    if (!isAuto) setIsLoadingInstances(true);
     let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
     
     try {
@@ -57,27 +67,28 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       
       // Mapeia o retorno da Evolution para o nosso formato de interface
       const mapped: Instance[] = data.map((item: any) => ({
-        id: item.instanceId || Math.random().toString(),
-        name: item.instanceName,
-        status: item.connectionStatus === 'open' ? 'connected' : 'disconnected',
+        id: item.instanceId || item.id || Math.random().toString(),
+        name: item.instanceName || item.name,
+        status: (item.connectionStatus === 'open' || item.status === 'open') ? 'connected' : 'disconnected',
         phone: item.ownerJid ? item.ownerJid.split('@')[0] : 'Não Pareado'
       }));
       
       setInstances(mapped);
       setTestResult('success');
     } catch (err) {
-      console.error("Erro ao sincronizar:", err);
+      console.error("Erro ao sincronizar com Evolution API:", err);
+      if (!isAuto) setTestResult('error');
     } finally {
       setIsLoadingInstances(false);
     }
   }, [config.evoUrl, config.evoKey]);
 
-  // Busca automática ao montar o componente
+  // Busca automática ao montar o componente (AQUI ESTÁ A CHAVE: Ele tenta sincronizar sempre que você "volta" pra aba)
   useEffect(() => {
     if (config.evoUrl && config.evoKey) {
-      refreshInstancesFromServer();
+      refreshInstancesFromServer(true);
     }
-  }, []);
+  }, [config.evoUrl, config.evoKey, refreshInstancesFromServer]);
 
   const handleTestConnection = async () => {
     if (!config.evoKey || !config.evoUrl) return alert("Preencha a URL e a Global Key.");
@@ -89,14 +100,14 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       setTestResult('success');
     } catch (e) {
       setTestResult('error');
-      setErrorMessage("Falha na conexão com o servidor.");
+      setErrorMessage("Falha na conexão com o servidor. Verifique a URL e a Key.");
     } finally {
       setIsTesting(false);
     }
   };
 
   const createInstanceInApp = async () => {
-    if (testResult !== 'success' || !config.evoInstance) return;
+    if (!config.evoInstance) return;
     const nameFormatted = config.evoInstance.toUpperCase().trim().replace(/\s+/g, '_');
     
     setIsLoadingInstances(true);
@@ -118,9 +129,9 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
       if (!response.ok) throw new Error("Erro ao criar instância no servidor.");
       
-      // Após criar com sucesso, atualiza a lista vindo do servidor
-      await refreshInstancesFromServer();
+      // Após criar com sucesso, limpa o campo e força atualização
       setConfig({ ...config, evoInstance: '' });
+      await refreshInstancesFromServer();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -129,7 +140,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   };
 
   const deleteInstance = async (name: string) => {
-    if (!confirm(`Deseja realmente remover a instância ${name}?`)) return;
+    if (!confirm(`Deseja realmente remover a instância ${name} do servidor?`)) return;
     
     let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
     try {
@@ -137,7 +148,9 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         method: 'DELETE',
         headers: { 'apikey': config.evoKey }
       });
-      refreshInstancesFromServer();
+      // Remove localmente primeiro para dar feedback instantâneo
+      setInstances(prev => prev.filter(i => i.name !== name));
+      refreshInstancesFromServer(true);
     } catch (e) {
       alert("Erro ao deletar.");
     }
@@ -155,12 +168,14 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     };
 
     try {
+      // Tenta conectar
       const connectRes = await fetch(`${baseUrl}/instance/connect/${instance.name}`, { headers });
       const connectData = await connectRes.json();
       
       let qr = connectData.base64 || connectData.qrcode?.base64 || connectData.code;
 
       if (!qr) {
+        // Tenta buscar QR dedicado se falhar o connect
         await new Promise(r => setTimeout(r, 1000));
         const qrRes = await fetch(`${baseUrl}/instance/qrcode/${instance.name}`, { headers });
         const qrData = await qrRes.json();
@@ -170,7 +185,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       if (qr) {
         processQrData(qr);
       } else {
-        throw new Error("A API não gerou o código. Tente o Hard Reset.");
+        throw new Error("A API Evolution não retornou o código. Verifique se a instância está em modo de pareamento.");
       }
 
     } catch (err: any) {
@@ -183,8 +198,13 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setQrState('generating');
     let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
     try {
-      await fetch(`${baseUrl}/instance/logout/${instance.name}`, { method: 'DELETE', headers: { 'apikey': config.evoKey } }).catch(() => {});
-      await new Promise(r => setTimeout(r, 1000));
+      // Tenta deslogar para resetar o status no Baileys
+      await fetch(`${baseUrl}/instance/logout/${instance.name}`, { 
+        method: 'DELETE', 
+        headers: { 'apikey': config.evoKey } 
+      }).catch(() => {});
+      
+      await new Promise(r => setTimeout(r, 1500));
       fetchQrCode(instance);
     } catch (e) {
       setQrState('error');
@@ -215,7 +235,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setTimeout(() => {
       setQrState('done');
       setTimeout(() => {
-        refreshInstancesFromServer();
+        refreshInstancesFromServer(true);
         setShowQrPopUp(false);
       }, 1500);
     }, 2000);
@@ -234,10 +254,10 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.5em]">WayFlow Infrastructure</span>
               </div>
               <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Canais.</h1>
-              <p className="text-slate-500 font-medium mt-4 max-w-lg text-sm">Cluster de conexão sincronizado with sua Evolution API.</p>
+              <p className="text-slate-500 font-medium mt-4 max-w-lg text-sm">Cluster de conexão sincronizado com sua Evolution API.</p>
            </div>
            <button 
-             onClick={refreshInstancesFromServer}
+             onClick={() => refreshInstancesFromServer()}
              className="relative z-10 px-8 py-5 bg-white/5 border border-white/10 rounded-3xl flex items-center gap-4 hover:bg-white/10 transition-all group"
            >
               <RefreshCw size={20} className={`text-orange-500 ${isLoadingInstances ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
@@ -297,16 +317,11 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
           {/* Cards das Instâncias Reais */}
           <div className="lg:col-span-8">
-             {isLoadingInstances && instances.length === 0 ? (
-               <div className="h-full flex flex-col items-center justify-center gap-6 bg-white/[0.01] border border-dashed border-white/10 rounded-[4rem] p-20">
-                  <Loader2 size={48} className="text-orange-500 animate-spin" strokeWidth={3} />
-                  <p className="font-outfit text-xs font-black text-slate-500 uppercase tracking-widest italic">Lendo cluster da Evolution...</p>
-               </div>
-             ) : instances.length === 0 ? (
+             {instances.length === 0 && !isLoadingInstances ? (
                <div className="h-full flex flex-col items-center justify-center gap-6 bg-white/[0.01] border border-dashed border-white/10 rounded-[4rem] p-20 text-center">
                   <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center text-slate-800"><Smartphone size={32} /></div>
                   <h3 className="font-outfit text-xl font-black text-white italic uppercase">Nenhuma Instância.</h3>
-                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Use o painel ao lado para conectar sua primeira conta do WhatsApp.</p>
+                  <p className="text-slate-500 text-sm max-w-xs mx-auto">Conecte sua Evolution API e crie uma nova instância para começar.</p>
                </div>
              ) : (
                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -325,12 +340,12 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                        </div>
 
                        <div className="font-outfit mb-10">
-                          <h4 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">{inst.name}</h4>
+                          <h4 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none mb-3 truncate pr-2">{inst.name}</h4>
                           <div className="flex flex-col gap-2">
                             <div className="flex items-center gap-3">
                                <div className={`w-2.5 h-2.5 rounded-full ${inst.status === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500 shadow-[0_0_10px_#ef4444]'}`} />
                                <span className={`text-[10px] font-black uppercase tracking-widest ${inst.status === 'connected' ? 'text-emerald-500' : 'text-slate-600'}`}>
-                                  {inst.status === 'connected' ? 'SESSÃO ATIVA' : 'DESCONECTADO'}
+                                  {inst.status === 'connected' ? 'ONLINE' : 'DESCONECTADO'}
                                </span>
                             </div>
                             <p className="text-[10px] text-slate-500 font-bold tracking-widest">{inst.phone}</p>
@@ -346,11 +361,18 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          </button>
                        ) : (
                          <div className="w-full py-6 bg-emerald-500/5 text-emerald-500 rounded-[1.5rem] font-outfit font-black text-[10px] uppercase tracking-widest border border-emerald-500/20 flex items-center justify-center gap-4 cursor-default">
-                           <CheckCircle2 size={20} /> INSTÂNCIA PRONTA
+                           <CheckCircle2 size={20} /> PRONTO PARA USO
                          </div>
                        )}
                     </div>
                   ))}
+                  
+                  {isLoadingInstances && (
+                    <div className="col-span-full py-12 flex justify-center items-center gap-4">
+                       <Loader2 size={24} className="text-orange-500 animate-spin" />
+                       <p className="font-outfit text-[10px] font-black text-slate-500 uppercase tracking-widest">Sincronizando com Servidor...</p>
+                    </div>
+                  )}
                </div>
              )}
           </div>
@@ -439,7 +461,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                         onClick={simulateSuccess}
                         className="px-10 py-5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-orange-500/20 transition-all flex items-center gap-3 animate-pulse"
                      >
-                        <Zap size={14} /> Validar Conexão
+                        <Zap size={14} /> Forçar Validação
                      </button>
                    </div>
                 </div>
