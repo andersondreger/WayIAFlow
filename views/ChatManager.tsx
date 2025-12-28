@@ -40,7 +40,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     return url.replace(/\/$/, "");
   }, [config.evoUrl]);
 
-  // Busca instâncias - V1 e V2 usam o mesmo endpoint de listagem geralmente
+  // Busca instâncias disponíveis
   useEffect(() => {
     const fetchInstances = async () => {
       const baseUrl = getBaseUrl();
@@ -50,7 +50,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           headers: { 'apikey': config.evoKey }
         });
         const data = await response.json();
-        let raw: any[] = Array.isArray(data) ? data : (data.data || data.instances || []);
+        const raw = Array.isArray(data) ? data : (data.data || data.instances || []);
         const connected = raw.filter((i: any) => {
           const inst = i.instance || i;
           const status = i.connectionStatus || i.status || inst.status || i.state;
@@ -66,25 +66,31 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     fetchInstances();
   }, [config.evoKey, getBaseUrl, selectedInstanceName]);
 
-  // Função Robusta para buscar dados testando múltiplos caminhos (V1 e V2)
+  // Função Robusta para buscar dados - Prioriza V2 e faz fallback para V1
   const smartFetch = async (baseUrl: string, instance: string, category: 'chat' | 'contact') => {
     const endpoints = category === 'chat' 
-      ? [`/chat/findMany/${instance}`, `/chat/fetchChats/${instance}`] // V2 primeiro, V1 depois
+      ? [`/chat/findMany/${instance}`, `/chat/fetchChats/${instance}`]
       : [`/contact/findMany/${instance}`, `/contact/fetchContacts/${instance}`];
 
     for (const endpoint of endpoints) {
       try {
-        console.log(`Tentando endpoint: ${endpoint}`);
+        console.log(`[WayFlow] Tentando sincronizar via: ${endpoint}`);
         const response = await fetch(`${baseUrl}${endpoint}`, {
           headers: { 'apikey': config.evoKey }
         });
         
-        if (response.status === 404) continue; // Tenta o próximo se for 404
+        if (response.status === 404) {
+          console.warn(`[WayFlow] Endpoint ${endpoint} retornou 404. Tentando próximo...`);
+          continue;
+        }
         
+        if (!response.ok) throw new Error(`Status HTTP: ${response.status}`);
+
         const data = await response.json();
+        console.log(`[WayFlow] Sucesso no endpoint: ${endpoint}`, data);
         return data;
       } catch (e) {
-        console.warn(`Falha no endpoint ${endpoint}:`, e);
+        console.warn(`[WayFlow] Erro ao tentar ${endpoint}:`, e);
       }
     }
     return null;
@@ -102,16 +108,28 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       const contactData = await smartFetch(baseUrl, selectedInstanceName, 'contact');
 
       const leadMap = new Map<string, KanbanLead>();
+
+      // Extrator Inteligente: Busca por arrays dentro do objeto de resposta
       const extractArray = (data: any) => {
         if (!data) return [];
         if (Array.isArray(data)) return data;
-        // Na V2, os dados costumam vir dentro de 'data'
-        return data.data || data.chats || data.contacts || [];
+        if (data.data && Array.isArray(data.data)) return data.data;
+        if (data.chats && Array.isArray(data.chats)) return data.chats;
+        if (data.contacts && Array.isArray(data.contacts)) return data.contacts;
+        
+        // Busca a primeira propriedade que seja um array
+        for (const key in data) {
+          if (Array.isArray(data[key])) return data[key];
+        }
+        return [];
       };
 
       const rawChats = extractArray(chatData);
       const rawContacts = extractArray(contactData);
 
+      console.log(`[WayFlow] Sincronização: ${rawChats.length} chats e ${rawContacts.length} contatos encontrados.`);
+
+      // Processar Chats (Conversas Ativas)
       rawChats.forEach((chat: any) => {
         const jid = chat.id || chat.remoteJid || chat.jid || (chat.key && chat.key.remoteJid);
         if (!jid || jid.includes('@g.us')) return;
@@ -129,6 +147,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
       });
 
+      // Mesclar com Contatos (Agenda)
       rawContacts.forEach((contact: any) => {
         const jid = contact.id || contact.jid || contact.remoteJid;
         if (!jid || jid.includes('@g.us') || leadMap.has(jid)) return;
@@ -147,10 +166,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
       const finalLeads = Array.from(leadMap.values());
       setLeads(finalLeads);
-      if (finalLeads.length === 0) setErrorMsg("Nenhum contato encontrado. Verifique se a instância está conectada no celular.");
-      localStorage.setItem('wayflow_leads_cache', JSON.stringify(finalLeads));
+      
+      if (finalLeads.length === 0) {
+        setErrorMsg("A API respondeu, mas não retornou nenhum contato. Verifique se a instância está realmente conectada e possui conversas.");
+      } else {
+        localStorage.setItem('wayflow_leads_cache', JSON.stringify(finalLeads));
+      }
     } catch (error: any) { 
-      setErrorMsg(`Erro Crítico: ${error.message}`);
+      setErrorMsg(`Erro Crítico na Sincronização: ${error.message}`);
     } finally { setIsSyncing(false); }
   }, [selectedInstanceName, config.evoKey, getBaseUrl]);
 
@@ -167,7 +190,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     const baseUrl = getBaseUrl();
     if (!baseUrl) return;
 
-    // Tenta carregar mensagens (V2 usa findMessages)
+    // Tenta carregar mensagens (V2 prioritário)
     const endpoints = [`/chat/findMessages/${selectedInstanceName}`, `/chat/fetchMessages/${selectedInstanceName}`];
     
     for (const endpoint of endpoints) {
@@ -175,9 +198,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         const response = await fetch(`${baseUrl}${endpoint}`, {
           method: 'POST',
           headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 25 })
+          body: JSON.stringify({ 
+            where: { remoteJid: lead.id }, 
+            limit: 30 
+          })
         });
+        
         if (response.status === 404) continue;
+        
         const data = await response.json();
         const rawMsgs = Array.isArray(data) ? data : (data.data || data.messages || []);
 
@@ -187,9 +215,10 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           content: m.message?.conversation || m.message?.extendedTextMessage?.text || "Mensagem de Mídia",
           timestamp: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         })).reverse();
+        
         setMessages(formatted);
         break;
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("[WayFlow] Erro ao carregar mensagens:", e); }
     }
   };
 
@@ -211,7 +240,10 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
         }]);
       }
-    } catch (e) { alert("Erro ao enviar"); setNewMessage(text); } finally { setIsSending(false); }
+    } catch (e) { 
+      alert("Erro ao enviar mensagem."); 
+      setNewMessage(text); 
+    } finally { setIsSending(false); }
   };
 
   const filteredLeads = leads.filter(l => 
@@ -231,7 +263,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
              <div>
                 <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Central Live.</h1>
                 <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mt-1">
-                  Versão: {selectedInstanceName ? 'Evolution V2 Detected' : 'Detectando...'}
+                  Canal: <span className="text-orange-500">{selectedInstanceName || 'Nenhum'}</span>
                 </p>
              </div>
           </div>
@@ -273,7 +305,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
                <input 
                 type="text" 
-                placeholder="FILTRAR POR NOME..."
+                placeholder="FILTRAR LEADS..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 pl-10 pr-4 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-orange-500/50 transition-all"
@@ -284,7 +316,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               {filteredLeads.length === 0 && !isSyncing && (
                 <div className="py-20 text-center opacity-20 flex flex-col items-center border border-dashed border-white/10 rounded-3xl p-6">
                   <Users size={32} className="mb-4 text-slate-500" />
-                  <p className="text-[9px] font-black uppercase tracking-widest leading-relaxed">Nenhum lead encontrado <br/>no canal {selectedInstanceName}</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest leading-relaxed">Nenhum contato ativo <br/>no canal {selectedInstanceName}</p>
                 </div>
               )}
               {filteredLeads.map(lead => (
@@ -328,7 +360,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center opacity-10">
                       <Loader2 size={40} className="animate-spin mb-4" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">Buscando mensagens do servidor...</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-center">Iniciando Stream de Conversa...</p>
                    </div>
                  ) : messages.map(msg => (
                    <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
@@ -336,7 +368,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          <div className={`p-4 rounded-3xl text-[13px] font-medium leading-relaxed shadow-xl ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none'}`}>
                             {msg.content}
                          </div>
-                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'VOCÊ' : 'CLIENTE'}</p>
+                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'SISTEMA' : 'CLIENTE'}</p>
                       </div>
                    </div>
                  ))}
@@ -349,7 +381,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="ESCREVA SUA MENSAGEM..."
+                      placeholder="ESCREVA SUA RESPOSTA..."
                       className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-6 text-sm text-white outline-none focus:border-orange-500/50 transition-all placeholder:text-slate-800 font-medium"
                     />
                     <button 
@@ -368,7 +400,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  <MessageSquare size={48} className="text-orange-500" />
                </div>
                <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Núcleo de Atendimento.</h3>
-               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">O canal {selectedInstanceName} está ativo. Selecione um lead ao lado para interagir.</p>
+               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Selecione um lead ao lado para visualizar o fluxo neural de mensagens.</p>
             </div>
           )}
         </div>
