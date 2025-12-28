@@ -31,7 +31,6 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const [activeInstanceName, setActiveInstanceName] = useState<string | null>(null);
   const [isFetchingQr, setIsFetchingQr] = useState(false);
 
-  // Sincroniza configuração no localStorage sempre que mudar
   useEffect(() => {
     localStorage.setItem('wayflow_evo_config', JSON.stringify(config));
   }, [config]);
@@ -52,12 +51,15 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       const raw = Array.isArray(data) ? data : (data.instances || data.data || []);
       const mapped: Instance[] = raw.map((item: any) => {
         const instData = item.instance || item;
-        const status = (item.connectionStatus === 'open' || item.status === 'open' || instData.status === 'open' || item.state === 'open' || item.instance?.status === 'open') ? 'connected' : 'disconnected';
+        // Mapeamento resiliente para diferentes versões da API
+        const rawStatus = item.connectionStatus || item.status || instData.status || item.state;
+        const status = (rawStatus === 'open' || rawStatus === 'CONNECTED') ? 'connected' : 'disconnected';
+        
         return {
           id: item.instanceId || item.id || Math.random().toString(),
           name: item.instanceName || item.name || instData.name,
           status: status as any,
-          phone: item.ownerJid ? item.ownerJid.split('@')[0] : (instData.ownerJid ? instData.ownerJid.split('@')[0] : 'Desconectado')
+          phone: item.ownerJid ? item.ownerJid.split('@')[0] : (instData.ownerJid ? instData.ownerJid.split('@')[0] : 'OFFLINE')
         };
       });
 
@@ -101,7 +103,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       } else if (data.code) {
         alert("Pareamento via Código: " + data.code);
       } else {
-        throw new Error("QR Code não gerado automaticamente.");
+        throw new Error("QR Code não gerado.");
       }
     } catch (e: any) {
       alert(e.message);
@@ -150,7 +152,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/5 p-8 rounded-3xl relative overflow-hidden">
            <div className="relative z-10 font-outfit">
               <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none">Canais.</h1>
-              <p className="text-slate-500 font-medium mt-2 text-xs">Gestão de Canais Evolution API</p>
+              <p className="text-slate-500 font-medium mt-2 text-xs">Clusters Evolution API</p>
            </div>
            <button 
              onClick={() => refreshInstancesFromServer()}
