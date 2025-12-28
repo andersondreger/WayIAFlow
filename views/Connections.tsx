@@ -28,7 +28,6 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     return saved ? JSON.parse(saved) : { evoUrl: '', evoKey: '', evoInstance: '' };
   });
 
-  const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<'none' | 'success' | 'error'>('none');
   
   // Estados do QR Code
@@ -70,10 +69,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       setInstances(mapped);
       setTestResult('success');
     } catch (err: any) {
-      if (!isAuto) {
-        setTestResult('error');
-        console.error(err);
-      }
+      if (!isAuto) setTestResult('error');
     } finally {
       setIsLoadingInstances(false);
     }
@@ -86,26 +82,33 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   }, [config.evoUrl, config.evoKey, refreshInstancesFromServer]);
 
   const handleFetchQrCode = async (instanceName: string) => {
+    // Abrir modal imediatamente para feedback visual
+    setShowQrModal(true);
     setIsFetchingQr(true);
     setActiveInstanceName(instanceName);
     setQrCodeImage(null);
+    
     let baseUrl = config.evoUrl.trim().replace(/\/$/, "");
     try {
       const response = await fetch(`${baseUrl}/instance/connect/${instanceName}`, {
         headers: { 'apikey': config.evoKey }
       });
       const data = await response.json();
-      if (data.base64) {
-        setQrCodeImage(data.base64); // Suporte Evolution v1/v2
-        setShowQrModal(true);
+      
+      // Suporte para Evolution v1 (data.base64) e v2 (data.qrcode.base64)
+      const qrBase64 = data.base64 || data.qrcode?.base64;
+      
+      if (qrBase64) {
+        setQrCodeImage(qrBase64);
       } else if (data.code) {
-         // Se a API retornar apenas o código, podemos gerar localmente ou alertar
-         alert("Código de pareamento gerado: " + data.code);
+        alert("Pareamento via Código (Digitar no Celular): " + data.code);
       } else {
-        throw new Error("Não foi possível carregar o QR Code.");
+        throw new Error("Resposta da API não contém QR Code. Verifique se a instância está aberta.");
       }
     } catch (e: any) {
-      alert(e.message);
+      console.error(e);
+      alert("Erro ao obter QR Code: " + e.message);
+      setShowQrModal(false);
     } finally {
       setIsFetchingQr(false);
     }
@@ -128,7 +131,6 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       if (!response.ok) throw new Error("Erro ao criar.");
       setConfig({ ...config, evoInstance: '' });
       await refreshInstancesFromServer();
-      alert("Instância criada! Clique em 'Parear WhatsApp' para conectar.");
     } catch (err: any) { alert(err.message); } finally { setIsLoadingInstances(false); }
   };
 
@@ -148,7 +150,6 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CONNECTIONS} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in">
         
-        {/* Header Compacto */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/5 p-8 rounded-3xl relative overflow-hidden">
            <div className="relative z-10 font-outfit">
               <h1 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none">Canais.</h1>
@@ -187,8 +188,8 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
                    {testResult === 'success' && (
                      <div className="pt-6 border-t border-white/5 space-y-4">
-                        <InputGroup label="NOME DA NOVA INSTÂNCIA" placeholder="Ex: VENDAS_01" value={config.evoInstance} onChange={(v) => setConfig({...config, evoInstance: v})} />
-                        <button onClick={createInstanceInApp} className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-[9px] uppercase tracking-widest">Criar Instância</button>
+                        <InputGroup label="NOVA INSTÂNCIA" placeholder="Ex: VENDAS_01" value={config.evoInstance} onChange={(v) => setConfig({...config, evoInstance: v})} />
+                        <button onClick={createInstanceInApp} className="w-full py-4 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-black text-[9px] uppercase tracking-widest">Criar Canal</button>
                      </div>
                    )}
                 </div>
@@ -218,15 +219,14 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                         onClick={() => onNavigate(AppView.CHAT_MANAGER)}
                         className="w-full py-3 bg-white/5 text-white border border-white/10 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-white/10"
                        >
-                         Gerenciar Chats
+                         Ver Mensagens
                        </button>
                      ) : (
                        <button 
                         onClick={() => handleFetchQrCode(inst.name)}
-                        disabled={isFetchingQr}
                         className="w-full py-3 bg-orange-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-500 flex items-center justify-center gap-2"
                        >
-                         {isFetchingQr && activeInstanceName === inst.name ? <Loader2 size={12} className="animate-spin" /> : <QrCode size={12} />}
+                         <QrCode size={12} />
                          Parear WhatsApp
                        </button>
                      )}
@@ -237,21 +237,21 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         </div>
       </div>
 
-      {/* QR Code Modal */}
+      {/* QR Code Modal - Z-INDEX CORRIGIDO E VISIBILIDADE */}
       {showQrModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-[#020617]/90 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-[#03081a] border border-white/10 rounded-[3rem] p-10 max-w-sm w-full text-center relative shadow-2xl">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-6 bg-[#020617]/95 backdrop-blur-2xl animate-in fade-in duration-300">
+          <div className="bg-[#03081a] border border-white/10 rounded-[3rem] p-10 max-w-sm w-full text-center relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
             <button onClick={() => { setShowQrModal(false); refreshInstancesFromServer(true); }} className="absolute top-6 right-6 p-2 text-slate-500 hover:text-white transition-all"><X size={24} /></button>
-            <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Escaneie o QR.</h3>
-            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-8">Pareando Instância: {activeInstanceName}</p>
+            <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Escanear QR Code</h3>
+            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-8">Canal: {activeInstanceName}</p>
             
-            <div className="bg-white p-4 rounded-3xl mb-8 flex items-center justify-center shadow-inner overflow-hidden">
+            <div className="bg-white p-4 rounded-3xl mb-8 flex items-center justify-center shadow-inner overflow-hidden min-h-[256px]">
                {qrCodeImage ? (
                  <img src={qrCodeImage} alt="QR Code" className="w-full h-auto" />
                ) : (
-                 <div className="w-64 h-64 flex flex-col items-center justify-center text-slate-200">
-                    <Loader2 size={32} className="animate-spin text-orange-500 mb-4" />
-                    <span className="text-[9px] font-black uppercase">Gerando Código...</span>
+                 <div className="w-full h-full flex flex-col items-center justify-center text-slate-800 py-10">
+                    <Loader2 size={40} className="animate-spin text-orange-600 mb-4" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Solicitando Pareamento...</span>
                  </div>
                )}
             </div>
@@ -259,9 +259,9 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             <div className="space-y-4">
                <div className="flex items-center gap-3 p-4 bg-orange-600/10 border border-orange-500/20 rounded-2xl text-left">
                   <Info size={18} className="text-orange-500 shrink-0" />
-                  <p className="text-[10px] text-slate-400 leading-tight">Abra o WhatsApp, vá em <span className="text-white font-bold">Aparelhos Conectados</span> e escaneie o código acima.</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Vá em <span className="text-white font-bold">Configurações {'>'} Aparelhos Conectados</span> no seu celular.</p>
                </div>
-               <button onClick={() => { setShowQrModal(false); refreshInstancesFromServer(true); }} className="w-full py-4 bg-white/5 text-white font-black text-[10px] uppercase tracking-widest rounded-2xl hover:bg-white/10">Já escaneei, fechar</button>
+               <button onClick={() => { setShowQrModal(false); refreshInstancesFromServer(true); }} className="w-full py-4 bg-white/5 text-white font-black text-[10px] uppercase tracking-widest rounded-2xl hover:bg-white/10">Já escaneei o código</button>
             </div>
           </div>
         </div>
