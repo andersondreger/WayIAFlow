@@ -80,34 +80,39 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       'Accept': 'application/json'
     };
 
-    console.log(`%c[WayFlow] Iniciando Handshake com: ${instance.name}`, "color: #f59e0b; font-weight: bold;");
+    console.log(`%c[WayFlow] Analisando Instância: ${instance.name}`, "color: #f59e0b; font-weight: bold;");
 
     try {
-      // 1. TENTA CONNECT (Verifica se já está logado ou se gera QR)
+      // 1. TENTA CONNECT (A v2 geralmente retorna o QR aqui se não estiver logado)
       const connectRes = await fetch(`${baseUrl}/instance/connect/${instance.name}`, { headers });
       const connectData = await connectRes.json();
       
-      console.log("[WayFlow] Resposta da API v2:", connectData);
+      console.log("[WayFlow] Resposta da API:", connectData);
 
-      // Verificação de Instância Já Aberta (Status 'open')
-      const status = connectData.instance?.status || connectData.status || connectData.state;
-      if (status === 'open' || status === 'CONNECTED') {
-        console.log("%c[WayFlow] Instância já conectada. Sincronizando...", "color: #10b981; font-weight: bold;");
+      // VERIFICAÇÃO EXTREMA DE STATUS 'OPEN'
+      const rawDataString = JSON.stringify(connectData).toLowerCase();
+      const isConnected = rawDataString.includes('"open"') || 
+                          rawDataString.includes('"connected"') || 
+                          rawDataString.includes('"online"');
+
+      if (isConnected) {
+        console.log("%c[WayFlow] Instância identificada como ATIVA. Pulando QR...", "color: #10b981; font-weight: bold;");
         setQrState('done');
-        updateInstanceStatus(instance.id, 'connected', connectData.instance?.ownerJid || 'Online');
+        updateInstanceStatus(instance.id, 'connected', connectData.instance?.ownerJid || 'Dispositivo Pareado');
         setTimeout(() => setShowQrPopUp(false), 2000);
         return;
       }
 
-      // Lógica de Extração de QR (v2 pode retornar em vários locais)
+      // EXTRATOR UNIVERSAL DE QR (Busca em todos os campos conhecidos da v2)
       let qr = connectData.base64 || 
                connectData.qrcode?.base64 || 
+               connectData.instance?.qrcode?.base64 ||
                connectData.code || 
                connectData.qrcode?.code;
 
-      // 2. FALLBACK PARA CREATE SE NÃO HOUVER QR (E NÃO ESTIVER OPEN)
+      // 2. SE NÃO HOUVER QR NO CONNECT, PODE SER QUE A INSTÂNCIA PRECISE SER REINICIADA OU CRIADA
       if (!qr) {
-        console.log("[WayFlow] QR não encontrado no connect, tentando forçar via create...");
+        console.log("[WayFlow] QR não encontrado no connect. Tentando recuperar via status/qrcode...");
         const createRes = await fetch(`${baseUrl}/instance/create`, {
           method: 'POST',
           headers,
@@ -119,19 +124,20 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
 
         const createData = await createRes.json();
-        qr = createData.qrcode?.base64 || createData.base64 || createData.code;
+        qr = createData.qrcode?.base64 || createData.base64 || createData.code || createData.instance?.qrcode?.base64;
       }
 
       if (qr) {
         processQrData(qr);
       } else {
-        throw new Error("A instância está ativa no servidor mas não gerou o código de pareamento. Tente recriar a instância.");
+        // Se a API não der erro mas não enviar QR, e não detectamos 'open', vamos sugerir o Logout para resetar o cache da Evolution
+        throw new Error("O servidor Evolution reconhece a instância, mas não liberou o QR Code. Tente reiniciar a instância ou verifique se ela já está aberta em outra aba.");
       }
 
     } catch (err: any) {
       console.error("[WayFlow Error]", err);
       setQrState('error');
-      setErrorMessage(err.message || "Falha crítica na comunicação com o servidor.");
+      setErrorMessage(err.message || "Falha na comunicação.");
     }
   };
 
@@ -144,11 +150,9 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const processQrData = (qr: string) => {
     let finalUrl = "";
     if (qr.includes('base64')) {
-      // Sanitização de Base64
       const cleanBase64 = qr.replace(/\s/g, "").replace(/^data:image\/png;base64,/, "");
       finalUrl = `data:image/png;base64,${cleanBase64}`;
     } else {
-      // Fallback para gerador externo se for apenas o código texto
       finalUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=${encodeURIComponent(qr)}`;
     }
     setCurrentQrUrl(finalUrl);
@@ -229,7 +233,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                   <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl flex gap-4 animate-in fade-in">
                      <AlertTriangle className="text-red-500 shrink-0" size={20} />
                      <div>
-                        <p className="text-[11px] text-red-400 font-black uppercase tracking-widest mb-1">Erro de Handshake</p>
+                        <p className="text-[11px] text-red-400 font-black uppercase tracking-widest mb-1">Status da API</p>
                         <p className="text-[10px] text-slate-400 font-bold leading-relaxed">{errorMessage}</p>
                      </div>
                   </div>
@@ -303,7 +307,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          {qrState === 'generating' ? (
                            <div className="flex flex-col items-center gap-6">
                               <Loader2 size={64} className="text-orange-500 animate-spin" strokeWidth={3} />
-                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Analisando Cluster...</p>
+                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Capturando Handshake...</p>
                            </div>
                          ) : qrState === 'error' ? (
                            <div className="flex flex-col items-center gap-6 text-center px-4">
@@ -357,7 +361,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                         onClick={simulateSuccess}
                         className="px-10 py-5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-orange-500/20 transition-all flex items-center gap-3 animate-pulse"
                      >
-                        <Zap size={14} /> Sincronizar Manual (Trial)
+                        <Zap size={14} /> Sincronizar Manual (Demo)
                      </button>
                    </div>
                 </div>
