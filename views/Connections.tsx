@@ -37,16 +37,12 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const handleTestConnection = () => {
     if (!config.evoKey || !config.evoUrl) return alert("Preencha a URL e a Global Key.");
     setIsTesting(true);
+    setErrorMessage('');
     
     const cleanUrl = config.evoUrl.replace(/\/$/, "");
     
-    // Alerta de URL sem versão (Causa comum de 404)
-    if (!cleanUrl.toLowerCase().endsWith('/v2') && !cleanUrl.toLowerCase().endsWith('/v1')) {
-      setErrorMessage("Dica: Sua URL parece não ter a versão. Tente adicionar /v2 no final.");
-    }
-
     if (window.location.protocol === 'https:' && cleanUrl.startsWith('http:')) {
-      setErrorMessage("Erro: Site HTTPS não pode conectar em API HTTP. Use SSL na sua API.");
+      setErrorMessage("Bloqueio de Segurança: Cloudflare exige HTTPS. Use https:// na sua API.");
       setTestResult('error');
       setIsTesting(false);
       return;
@@ -78,57 +74,64 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setErrorMessage('');
     setCurrentQrUrl('');
     
-    const cleanUrl = config.evoUrl.replace(/\/$/, "");
     const headers = {
       'apikey': config.evoKey,
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     };
 
-    try {
-      // 1. Tenta Criar/Garantir Instância
+    const tryFetch = async (baseUrl: string) => {
+      const cleanUrl = baseUrl.replace(/\/$/, "");
+      
+      // 1. Tenta Criar
       const createRes = await fetch(`${cleanUrl}/instance/create`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ instanceName: instance.name, qrcode: true })
       });
 
-      const createData = await createRes.json();
-      let qrSource = createData.qrcode?.base64 || createData.base64;
+      if (createRes.status === 404) return { status: 404 };
 
-      // 2. Se não veio no create, tenta a rota /connect (Padrão Evolution)
-      if (!qrSource) {
+      const createData = await createRes.json();
+      let qr = createData.qrcode?.base64 || createData.base64;
+
+      // 2. Se não veio no create, tenta connect
+      if (!qr && createRes.ok) {
         const connectRes = await fetch(`${cleanUrl}/instance/connect/${instance.name}`, { headers });
         const connectData = await connectRes.json();
-        
-        if (connectRes.status === 404) {
-           // Se deu 404 no /connect, tenta rota alternativa /qrcode (Algumas versões usam)
-           const altRes = await fetch(`${cleanUrl}/instance/qrcode/${instance.name}`, { headers });
-           const altData = await altRes.json();
-           if (altRes.ok) qrSource = altData.base64 || altData.code;
-        } else if (connectRes.ok) {
-           qrSource = connectData.base64 || connectData.code;
-        }
+        qr = connectData.base64 || connectData.code;
       }
 
-      if (qrSource) {
+      return { status: createRes.status, qr };
+    };
+
+    try {
+      let result = await tryFetch(config.evoUrl);
+
+      // LÓGICA DE AUTO-CORREÇÃO DE URL (Se der 404, tenta adicionar /v2)
+      if (result.status === 404 && !config.evoUrl.includes('/v2')) {
+        console.log("Detectado 404. Tentando auto-correção para /v2...");
+        result = await tryFetch(`${config.evoUrl.replace(/\/$/, "")}/v2`);
+      }
+
+      if (result.qr) {
         let finalUrl = "";
-        if (typeof qrSource === 'string' && qrSource.includes('base64')) {
-          const cleanBase64 = qrSource.replace(/\s/g, "").replace(/^data:image\/png;base64,/, "");
+        if (typeof result.qr === 'string' && result.qr.includes('base64')) {
+          const cleanBase64 = result.qr.replace(/\s/g, "").replace(/^data:image\/png;base64,/, "");
           finalUrl = `data:image/png;base64,${cleanBase64}`;
         } else {
-          finalUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=${encodeURIComponent(qrSource)}`;
+          finalUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=10&data=${encodeURIComponent(result.qr)}`;
         }
         setCurrentQrUrl(finalUrl);
         setQrState('waiting');
       } else {
-        throw new Error("404: A API não encontrou a rota de QR Code. Verifique se adicionou /v2 na URL.");
+        throw new Error("Não foi possível localizar as rotas da API. Verifique se a URL e a API Key estão corretas.");
       }
 
     } catch (err: any) {
-      console.error("Fetch QR Error:", err);
+      console.error("Fetch Error:", err);
       setQrState('error');
-      setErrorMessage(err.message.includes('404') ? "Erro 404: Rota não encontrada. Adicione /v2 ao final da sua URL." : err.message);
+      setErrorMessage(err.message || "Erro de conexão com a API.");
     }
   };
 
@@ -161,14 +164,14 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
            <div className="relative z-10 font-outfit">
               <div className="flex items-center gap-3 mb-4">
                  <div className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-pulse shadow-[0_0_10px_#f59e0b]" />
-                 <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.5em]">WayFlow Secure Bridge</span>
+                 <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.5em]">WayFlow Infrastructure</span>
               </div>
-              <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Cluster.</h1>
-              <p className="text-slate-500 font-medium mt-4 max-w-lg text-sm">Conecte seus terminais Evolution API para processamento neural.</p>
+              <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none">Canais.</h1>
+              <p className="text-slate-500 font-medium mt-4 max-w-lg text-sm">Gerencie suas instâncias da Evolution API em um cluster centralizado.</p>
            </div>
            <div className="relative z-10 px-8 py-5 bg-white/5 border border-white/10 rounded-3xl flex items-center gap-4">
               <Database size={20} className="text-orange-500" />
-              <p className="font-outfit text-lg font-black text-white">{instances.length} Conexões</p>
+              <p className="font-outfit text-lg font-black text-white">{instances.length} Ativos</p>
            </div>
         </div>
 
@@ -182,8 +185,8 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                 </div>
 
                 <div className="space-y-6">
-                   <InputGroup icon={Globe} label="URL DO SERVIDOR (Tente com /v2 no fim)" placeholder="https://api.site.com/v2" value={config.evoUrl} onChange={(v) => setConfig({...config, evoUrl: v})} />
-                   <InputGroup icon={Lock} label="GLOBAL API KEY" placeholder="Chave do seu .env" type="password" value={config.evoKey} onChange={(v) => setConfig({...config, evoKey: v})} />
+                   <InputGroup icon={Globe} label="URL DO SERVIDOR" placeholder="https://api.seudominio.com" value={config.evoUrl} onChange={(v) => setConfig({...config, evoUrl: v})} />
+                   <InputGroup icon={Lock} label="GLOBAL API KEY" placeholder="apikey do seu .env" type="password" value={config.evoKey} onChange={(v) => setConfig({...config, evoKey: v})} />
                    
                    <button 
                     onClick={handleTestConnection}
@@ -192,27 +195,34 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                     }`}
                    >
                      {isTesting ? <Loader2 size={18} className="animate-spin" /> : testResult === 'success' ? <Check size={18} /> : <RefreshCw size={18} />}
-                     {testResult === 'success' ? 'PRONTO PARA CRIAR' : 'VALIDAR ACESSO'}
+                     {testResult === 'success' ? 'ENDPOINT PRONTO' : 'TESTAR ENDPOINT'}
                    </button>
 
                    {testResult === 'success' && (
                      <div className="animate-in slide-in-from-top-4 duration-500 space-y-6">
-                        <InputGroup icon={Monitor} label="ID DA INSTÂNCIA" placeholder="Ex: WHATS_VENDAS" value={config.evoInstance} onChange={(v) => setConfig({...config, evoInstance: v})} />
+                        <InputGroup icon={Monitor} label="NOME DA INSTÂNCIA" placeholder="Ex: WHATS_VENDAS" value={config.evoInstance} onChange={(v) => setConfig({...config, evoInstance: v})} />
                         <button onClick={createInstanceInApp} className="w-full py-6 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-[1.5rem] font-outfit font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-600/30">CRIAR NO DASHBOARD</button>
                      </div>
                    )}
                 </div>
 
                 {errorMessage && (
-                  <div className={`p-6 border rounded-3xl flex gap-4 animate-in fade-in ${errorMessage.includes('Dica') ? 'bg-blue-500/10 border-blue-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-                     {errorMessage.includes('Dica') ? <Info className="text-blue-500 shrink-0" size={20} /> : <AlertTriangle className="text-red-500 shrink-0" size={20} />}
-                     <p className={`text-[10px] font-bold leading-relaxed ${errorMessage.includes('Dica') ? 'text-blue-400' : 'text-red-400'}`}>{errorMessage}</p>
+                  <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl flex gap-4 animate-in fade-in">
+                     <AlertTriangle className="text-red-500 shrink-0" size={20} />
+                     <p className="text-[10px] text-red-400 font-bold leading-relaxed">{errorMessage}</p>
                   </div>
                 )}
+
+                <div className="p-6 bg-blue-500/5 border border-blue-500/20 rounded-3xl flex gap-4">
+                   <Info className="text-blue-500 shrink-0" size={20} />
+                   <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+                     DICA: Se sua URL não funcionar, tente adicionar <span className="text-white">/v2</span> no final dela manualmente.
+                   </p>
+                </div>
              </div>
           </div>
 
-          {/* Cards */}
+          {/* Cards de Instância */}
           <div className="lg:col-span-8">
              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {instances.map(inst => (
@@ -227,9 +237,9 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                      <div className="font-outfit mb-10">
                         <h4 className="text-3xl font-black text-white italic tracking-tighter uppercase leading-none mb-3">{inst.name}</h4>
                         <div className="flex items-center gap-3">
-                           <div className={`w-2.5 h-2.5 rounded-full ${inst.status === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500'}`} />
+                           <div className={`w-2.5 h-2.5 rounded-full ${inst.status === 'connected' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-red-500 shadow-[0_0_10px_#ef4444]'}`} />
                            <span className={`text-[10px] font-black uppercase tracking-widest ${inst.status === 'connected' ? 'text-emerald-500' : 'text-slate-600'}`}>
-                              {inst.status === 'connected' ? 'ONLINE' : 'OFFLINE'}
+                              {inst.status === 'connected' ? 'DISPONÍVEL' : 'OFFLINE'}
                            </span>
                         </div>
                      </div>
@@ -239,11 +249,11 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          onClick={() => openPairingPopUp(inst)}
                          className="w-full py-6 bg-orange-600 text-white rounded-[1.5rem] font-outfit font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-600/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4"
                        >
-                         <QrCode size={22} /> VINCULAR WHATSAPP
+                         <QrCode size={22} /> ESCANEAR QR CODE
                        </button>
                      ) : (
                        <div className="w-full py-6 bg-white/[0.02] text-slate-500 rounded-[1.5rem] font-outfit font-black text-[10px] uppercase tracking-widest border border-white/5 flex items-center justify-center gap-4 cursor-default">
-                         <CheckCircle2 size={20} className="text-emerald-500" /> SESSÃO ATIVA
+                         <CheckCircle2 size={20} className="text-emerald-500" /> SYNC ATIVO
                        </div>
                      )}
                   </div>
@@ -252,7 +262,7 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           </div>
         </div>
 
-        {/* MODAL QR (CORRIGIDO) */}
+        {/* MODAL QR CODE */}
         {showQrPopUp && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/98 backdrop-blur-3xl animate-in fade-in duration-500">
              <div className="w-full max-w-xl bg-[#020617] border border-white/10 rounded-[5rem] shadow-[0_0_200px_rgba(245,158,11,0.25)] overflow-hidden animate-in zoom-in-95 duration-700 relative">
@@ -261,43 +271,56 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                    <div className="font-outfit">
                       <div className="flex items-center gap-3 mb-2">
                         <Scan size={18} className="text-orange-500" />
-                        <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.5em]">WayFlow Neural Sync</span>
+                        <span className="text-[10px] font-black text-orange-500 uppercase tracking-[0.5em]">WayFlow Secure Scan</span>
                       </div>
-                      <h3 className="text-4xl font-black text-white italic tracking-tighter uppercase tracking-widest leading-none">Vincular.</h3>
+                      <h3 className="text-4xl font-black text-white italic tracking-tighter uppercase tracking-widest leading-none">Conexão.</h3>
                    </div>
                    <button onClick={() => setShowQrPopUp(false)} className="p-5 bg-white/5 rounded-[2rem] text-slate-500 hover:text-white transition-all border border-white/5"><X size={28} /></button>
                 </div>
                 
                 <div className="p-20 flex flex-col items-center">
+                   
                    <div className="relative mb-12">
                       <div className="absolute -inset-20 bg-orange-500/10 blur-[120px] rounded-full opacity-60 animate-pulse" />
-                      <div className="relative z-10 bg-white p-12 rounded-[4.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.6)] flex flex-col items-center justify-center min-w-[360px] min-h-[360px]">
+                      
+                      <div className="relative z-10 bg-white p-14 rounded-[4.5rem] shadow-[0_50px_100px_rgba(0,0,0,0.6)] flex flex-col items-center justify-center min-w-[380px] min-h-[380px]">
                          
                          {qrState === 'generating' ? (
                            <div className="flex flex-col items-center gap-6">
                               <Loader2 size={64} className="text-orange-500 animate-spin" strokeWidth={3} />
-                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Provisionando Canal...</p>
+                              <p className="font-outfit text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Sincronizando Nodes...</p>
                            </div>
                          ) : qrState === 'error' ? (
                            <div className="flex flex-col items-center gap-6 text-center px-4">
                               <AlertTriangle size={64} className="text-red-500 animate-bounce" />
-                              <p className="font-outfit text-sm font-black text-red-600 uppercase tracking-tight">{errorMessage}</p>
-                              <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="mt-6 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all active:scale-95"><RefreshCw size={14} /> Tentar Outra Rota</button>
+                              <p className="font-outfit text-sm font-black text-red-600 uppercase tracking-tight leading-tight">{errorMessage}</p>
+                              <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="mt-6 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2"><RefreshCw size={14} /> Tentar Novamente</button>
                            </div>
                          ) : (
                            <div className="relative overflow-hidden rounded-3xl">
-                              <img src={currentQrUrl} alt="QR Code" className={`w-72 h-72 transition-all duration-700 ${qrState !== 'waiting' ? 'opacity-5 blur-2xl' : 'opacity-100'}`} />
-                              {qrState === 'waiting' && <div className="absolute left-0 w-full h-1.5 bg-orange-500 shadow-[0_0_20px_#f59e0b] blur-[1px] z-20 animate-[laser_3.5s_infinite]" />}
+                              <img 
+                                src={currentQrUrl} 
+                                alt="WhatsApp QR Code" 
+                                className={`w-72 h-72 transition-all duration-700 ${qrState !== 'waiting' ? 'opacity-5 blur-2xl' : 'opacity-100'}`}
+                              />
+                              
+                              {qrState === 'waiting' && (
+                                <div className="absolute left-0 w-full h-1.5 bg-orange-500 shadow-[0_0_20px_#f59e0b] blur-[1px] z-20 animate-[laser_3.5s_infinite]" />
+                              )}
+
                               {qrState === 'syncing' && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-white/80">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-white/80 animate-in fade-in">
                                    <RefreshCw size={64} className="text-orange-600 animate-spin" />
-                                   <p className="font-outfit text-sm font-black text-slate-950 uppercase tracking-widest italic">Autenticando...</p>
+                                   <p className="font-outfit text-sm font-black text-slate-950 uppercase tracking-widest italic">Vinculando...</p>
                                 </div>
                               )}
+                              
                               {qrState === 'done' && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-white/95">
-                                   <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-2xl animate-bounce"><Check size={56} strokeWidth={4} /></div>
-                                   <h4 className="font-outfit text-3xl font-black text-slate-950 italic uppercase">Sucesso!</h4>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-white/95 animate-in zoom-in">
+                                   <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-2xl animate-bounce">
+                                      <Check size={56} strokeWidth={4} />
+                                   </div>
+                                   <h4 className="font-outfit text-3xl font-black text-slate-950 italic tracking-tighter uppercase">Conectado!</h4>
                                 </div>
                               )}
                            </div>
@@ -307,11 +330,18 @@ const Connections: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
                    <div className="flex flex-col items-center gap-4">
                      {qrState === 'waiting' && (
-                       <button onClick={() => activeInstance && fetchQrCode(activeInstance)} className="px-8 py-4 bg-white/5 hover:bg-white/10 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-white/5 transition-all flex items-center gap-3">
-                          <RefreshCw size={14} /> Atualizar Token
+                       <button 
+                          onClick={() => activeInstance && fetchQrCode(activeInstance)}
+                          className="px-8 py-4 bg-white/5 hover:bg-white/10 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-white/5 transition-all flex items-center gap-3"
+                       >
+                          <RefreshCw size={14} /> Novo Código
                        </button>
                      )}
-                     <button onClick={simulateSuccess} className="px-10 py-5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-orange-500/20 transition-all flex items-center gap-3 animate-pulse">
+                     
+                     <button 
+                        onClick={simulateSuccess}
+                        className="px-10 py-5 bg-orange-600/10 hover:bg-orange-600/20 text-orange-500 rounded-2xl font-black text-[10px] uppercase tracking-[0.3em] border border-orange-500/20 transition-all flex items-center gap-3 animate-pulse"
+                     >
                         <Zap size={14} /> Ativar Manualmente (Demo)
                      </button>
                    </div>
