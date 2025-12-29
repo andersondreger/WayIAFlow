@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  MessageSquare, Users, Loader2, RefreshCw, Send, Paperclip, Phone, MoreHorizontal, UserCircle, Search, AlertTriangle, ShieldCheck, Database, Terminal, Zap, Globe, WifiOff, Scan, Activity, Cpu
+  MessageSquare, Users, Loader2, RefreshCw, Send, Paperclip, Phone, MoreHorizontal, UserCircle, Search, AlertTriangle, ShieldCheck, Database, Terminal, Zap, Globe, WifiOff, Scan, Activity, Cpu, Code, Copy, ChevronDown, ChevronUp
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView, KanbanLead, ChatMessage } from '../types.ts';
@@ -16,6 +16,8 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const [searchTerm, setSearchTerm] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [lastRawError, setLastRawError] = useState<any>(null);
+  const [showRawError, setShowRawError] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [config] = useState(() => {
@@ -56,15 +58,15 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         },
         mode: 'cors'
       });
+      
       if (!res.ok) {
-         const errData = await res.json().catch(() => ({}));
-         throw new Error(errData.message || `Status ${res.status}: ${res.statusText}`);
+         const errData = await res.json().catch(() => ({ error: `Status ${res.status}` }));
+         setLastRawError(errData);
+         throw new Error(errData.message || `Erro do Servidor (${res.status})`);
       }
-      return await res.json();
+      return await res.ok ? res.json() : null;
     } catch (e: any) {
-      if (e.message.includes('Failed to fetch')) {
-        throw new Error("Erro de Rede: Verifique se o Docker da API está online e o CORS liberado.");
-      }
+      addLog(`Falha na Requisição: ${e.message}`);
       throw e;
     }
   };
@@ -83,60 +85,64 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     return [];
   };
 
+  // Função crítica para extrair o JID correto (LID vs Standard)
+  const extractCorrectJid = (data: any): string => {
+    // Prioriza remoteJidAlt que geralmente contém o @s.whatsapp.net em contas LID
+    const jid = data.remoteJidAlt || data.remoteJid || data.id || data.jid || (data.key?.remoteJid);
+    return jid || '';
+  };
+
   const handleSync = useCallback(async () => {
     const baseUrl = getBaseUrl();
     if (!selectedInstanceName || !baseUrl || !config.evoKey) {
-      setErrorMsg("Configure a URL e a API Key em Integrações.");
+      setErrorMsg("Configurações ausentes. Verifique a URL e API Key.");
       return;
     }
     
     setIsSyncing(true);
     setErrorMsg(null);
+    setLastRawError(null);
     setLeads([]);
-    addLog(`Iniciando Protocolo de Força Bruta: ${selectedInstanceName}`);
+    addLog(`Dumping Node Data: ${selectedInstanceName}`);
     
     try {
-      // 1. Validar Conexão
-      addLog("Verificando pulsação do container...");
+      addLog("Pingando Evolution Container...");
       const stateData = await performFetch(`${baseUrl}/instance/connectionState/${selectedInstanceName}`);
       const state = stateData.instance?.state || stateData.state;
-      
+      addLog(`Estado reportado: ${state}`);
+
       if (state !== 'open' && state !== 'CONNECTED') {
-        throw new Error(`Instância ${selectedInstanceName} está em estado: ${state}. Reconecte o QR Code.`);
+        throw new Error(`Instância desconectada. Abra o menu Conexões e escaneie o QR.`);
       }
 
-      // 2. Gatilho de Sincronia Forçada (Evolution v2 exige POST para fetch)
-      addLog("Gatilhando Fetch de Contatos (POST)...");
+      addLog("Gatilhando Sync de Contatos...");
       await fetch(`${baseUrl}/chat/fetchChats/${selectedInstanceName}`, { method: 'POST', headers: { 'apikey': config.evoKey } }).catch(() => {});
       await fetch(`${baseUrl}/contact/fetchContacts/${selectedInstanceName}`, { method: 'POST', headers: { 'apikey': config.evoKey } }).catch(() => {});
 
-      // 3. Aguardar Gravação no Postgres
-      addLog("Aguardando 3.5s para processamento do Postgres...");
-      await new Promise(r => setTimeout(r, 3500));
+      addLog("Aguardando gravação no Postgres...");
+      await new Promise(r => setTimeout(r, 4000));
 
-      // 4. Tentativa de Leitura Primária
-      addLog("Recuperando lista de chats...");
+      addLog("Buscando registros...");
       let data = await performFetch(`${baseUrl}/chat/findMany/${selectedInstanceName}`);
       let chats = findDataArray(data);
 
-      // 5. Fallback: Deep Scan (Se chats estiver vazio, busca em mensagens)
       if (chats.length === 0) {
-        addLog("Aviso: Tabela de Chats vazia. Iniciando reconstrução via Histórico de Mensagens...");
+        addLog("Database de Chats limpa. Tentando Deep Scan de Mensagens...");
         const msgData = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
           method: 'POST',
           body: JSON.stringify({ where: {}, limit: 100 })
         });
         const msgs = findDataArray(msgData);
         if (msgs.length > 0) {
-          addLog(`Sucesso! ${msgs.length} interações encontradas. Mapeando JIDs...`);
+          addLog(`Inspecionando ${msgs.length} mensagens para extrair contatos...`);
           msgs.forEach((m: any) => {
-            const jid = m.key?.remoteJid;
+            const jid = extractCorrectJid(m.key || m);
             if (jid && !jid.includes('@g.us')) {
-              if (!chats.some(c => (c.id || c.remoteJid) === jid)) {
+              if (!chats.some(c => extractCorrectJid(c) === jid)) {
                 chats.push({ 
                   id: jid, 
-                  name: jid.split('@')[0], 
-                  lastMessage: m.message?.conversation || "Conversa em Andamento" 
+                  name: m.pushName || jid.split('@')[0], 
+                  lastMessage: m.message?.conversation || "Interação Identificada" 
                 });
               }
             }
@@ -144,14 +150,18 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         }
       }
 
-      // 6. Mapeamento final
       const mappedLeads: KanbanLead[] = chats.map((chat: any) => {
-        const jid = chat.id || chat.remoteJid || chat.jid;
+        const jid = extractCorrectJid(chat);
+        const cleanPhone = jid.split('@')[0];
+        const isLid = jid.includes('@lid');
+        
+        if (isLid) addLog(`Atenção: Identidade LID detectada para ${cleanPhone}`);
+
         return {
           id: jid,
-          name: chat.name || chat.pushName || jid.split('@')[0],
-          phone: jid.split('@')[0],
-          lastMessage: chat.lastMessage || "Sem mensagens",
+          name: chat.name || chat.pushName || cleanPhone,
+          phone: cleanPhone,
+          lastMessage: chat.lastMessage || "Conversa Ativa",
           value: 0,
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(chat.name || 'W')}&background=f59e0b&color=fff`,
           columnId: 'ai_processing',
@@ -161,16 +171,16 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       });
 
       if (mappedLeads.length > 0) {
-        addLog(`Protocolo concluído. ${mappedLeads.length} contatos sincronizados.`);
+        addLog(`Sucesso: ${mappedLeads.length} leads mapeados via Postgres.`);
         setLeads(mappedLeads);
         localStorage.setItem('wayflow_leads_cache', JSON.stringify(mappedLeads));
       } else {
-        addLog("Erro: Banco de dados ainda vazio. Dica: Envie uma mensagem pelo seu celular agora para forçar um evento.");
-        setErrorMsg("API conectada, mas banco vazio. Envie uma mensagem no seu celular e sincronize novamente.");
+        addLog("O Postgres está retornando 0 registros. Cheque se 'DATABASE_ENABLED=true' no seu .env do Docker.");
+        setErrorMsg("API Conectada, mas sem dados no Banco. Envie uma mensagem pelo celular para forçar o cache.");
       }
 
     } catch (e: any) {
-      addLog(`Falha Crítica: ${e.message}`);
+      addLog(`ERRO: ${e.message}`);
       setErrorMsg(e.message);
     } finally {
       setIsSyncing(false);
@@ -195,7 +205,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         setSelectedInstanceName(connected[0].instanceName || connected[0].name);
       }
     } catch (e) {
-      addLog("Não foi possível listar instâncias.");
+      addLog("Node fora de alcance.");
     }
   }, [config.evoKey, getBaseUrl, selectedInstanceName]);
 
@@ -215,7 +225,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setMessages([]);
     const baseUrl = getBaseUrl();
     try {
-      addLog(`Carregando canal: +${lead.phone}`);
+      addLog(`Abrindo canal: ${lead.id}`);
       const data = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
         method: 'POST',
         body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 50 })
@@ -224,12 +234,12 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       const formatted: ChatMessage[] = rawMsgs.map((m: any): ChatMessage => ({
         id: m.key?.id || Math.random().toString(),
         sender: (m.key?.fromMe ? 'agent' : 'user') as 'agent' | 'user',
-        content: m.message?.conversation || m.message?.extendedTextMessage?.text || "Mídia ou Anexo",
+        content: m.message?.conversation || m.message?.extendedTextMessage?.text || "Conteúdo Multimídia",
         timestamp: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })).reverse();
       setMessages(formatted);
     } catch (e: any) {
-      addLog(`Erro ao baixar histórico do chat.`);
+      addLog(`Erro ao carregar mensagens.`);
     }
   };
 
@@ -242,14 +252,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     try {
       await performFetch(`${baseUrl}/message/sendText/${selectedInstanceName}`, {
         method: 'POST',
-        body: JSON.stringify({ number: selectedLead.id, text: text, delay: 1000 })
+        body: JSON.stringify({ number: selectedLead.id, text: text, delay: 1200 })
       });
       setMessages(prev => [...prev, { 
         id: Math.random().toString(), sender: 'agent', content: text, 
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
       }]);
     } catch (e: any) {
-      alert("Falha ao injetar mensagem no fluxo.");
+      alert("Falha no Uplink de Mensagem.");
       setNewMessage(text);
     } finally {
       setIsSending(false);
@@ -264,16 +274,16 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="h-full flex flex-col gap-4 animate-in fade-in duration-500 max-h-[calc(100vh-120px)] overflow-hidden">
         
-        {/* Top Control Bar */}
+        {/* Controle de Cluster */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/10 p-5 rounded-3xl shadow-2xl shrink-0">
           <div className="flex items-center gap-4">
              <div className="w-12 h-12 bg-orange-600/20 rounded-2xl flex items-center justify-center text-orange-500 border border-orange-500/20 shadow-lg">
                 <Zap size={24} />
              </div>
              <div>
-                <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Canal de Atendimento.</h1>
+                <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Central de Atendimento.</h1>
                 <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mt-1">
-                  Cluster: <span className="text-orange-500">{selectedInstanceName || 'OFFLINE'}</span>
+                  Node Ativo: <span className="text-orange-500">{selectedInstanceName || 'OFFLINE'}</span>
                 </p>
              </div>
           </div>
@@ -284,7 +294,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                onChange={(e) => setSelectedInstanceName(e.target.value)}
                className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-[10px] text-white font-black uppercase tracking-[0.2em] outline-none cursor-pointer flex-1 md:min-w-[220px] focus:border-orange-500 transition-all appearance-none"
              >
-               {availableInstances.length === 0 && <option>Nenhum Node Aberto</option>}
+               {availableInstances.length === 0 && <option>Aguardando Node...</option>}
                {availableInstances.map(inst => (
                  <option key={inst.id} value={inst.instanceName || inst.name}>📡 {inst.instanceName || inst.name}</option>
                ))}
@@ -301,46 +311,71 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           </div>
         </div>
 
-        {/* Diagnostic Terminal View */}
-        <div className="bg-black/90 border border-white/5 rounded-2xl p-4 flex flex-col gap-1 overflow-hidden shrink-0 shadow-inner max-h-40 overflow-y-auto custom-scrollbar">
+        {/* Terminal de Trace (Crítico para encontrar o erro) */}
+        <div className="bg-black/95 border border-white/10 rounded-2xl p-4 flex flex-col gap-1 overflow-hidden shrink-0 shadow-inner">
             <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                    <Terminal size={12} className="text-orange-500" />
-                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Diagnóstico WayFlow Engine</span>
+                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Trace de Eventos Baileys (Evolution v2.3.7)</span>
                 </div>
-                <div className="flex items-center gap-2">
-                   <div className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
-                   <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Node Logs</span>
+                <div className="flex items-center gap-3">
+                   {lastRawError && (
+                     <button 
+                      onClick={() => setShowRawError(!showRawError)}
+                      className="flex items-center gap-2 text-[8px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-2 py-1 rounded border border-red-500/20 hover:bg-red-500/20 transition-all"
+                     >
+                       <Code size={10} /> {showRawError ? 'Esconder JSON' : 'Ver Payload Bruto'}
+                     </button>
+                   )}
+                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                   <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Postgres Uplink</span>
                 </div>
             </div>
-            {debugLog.length === 0 ? (
-               <p className="text-[10px] font-mono text-slate-700 italic">Aguardando comando de uplink...</p>
-            ) : debugLog.map((log, i) => (
-              <p key={i} className={`text-[10px] font-mono ${i === 0 ? 'text-orange-400' : 'text-slate-600'} truncate`}>
-                {i === 0 ? '>> ' : ''}{log}
-              </p>
-            ))}
+            
+            {showRawError && lastRawError && (
+              <div className="mb-4 p-4 bg-red-950/30 border border-red-500/20 rounded-xl overflow-hidden animate-in slide-in-from-top-2">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[9px] font-black text-red-400 uppercase tracking-widest">Resposta da API</span>
+                  <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(lastRawError, null, 2)); alert("Copiado!"); }} className="p-1.5 bg-white/5 rounded text-slate-400 hover:text-white transition-all"><Copy size={10} /></button>
+                </div>
+                <pre className="text-[10px] font-mono text-red-200/60 overflow-x-auto max-h-32 custom-scrollbar">
+                  {JSON.stringify(lastRawError, null, 2)}
+                </pre>
+              </div>
+            )}
+
+            <div className="max-h-24 overflow-y-auto custom-scrollbar">
+              {debugLog.length === 0 ? (
+                 <p className="text-[10px] font-mono text-slate-700 italic">Monitorando logs do container...</p>
+              ) : debugLog.map((log, i) => (
+                <p key={i} className={`text-[10px] font-mono ${i === 0 ? 'text-orange-400' : 'text-slate-600'} truncate`}>
+                  {i === 0 ? '>> ' : ''}{log}
+                </p>
+              ))}
+            </div>
         </div>
 
         {errorMsg && (
-          <div className="bg-red-500/10 border border-red-500/20 p-5 rounded-3xl flex items-center gap-5 text-red-500 animate-in slide-in-from-top-2 shadow-lg">
+          <div className="bg-orange-500/10 border border-orange-500/20 p-5 rounded-3xl flex items-center gap-5 text-orange-500 animate-in slide-in-from-top-2 shadow-lg">
              <AlertTriangle size={28} className="shrink-0" />
              <div className="flex-1">
-                <p className="text-[11px] font-black uppercase tracking-widest leading-tight mb-1">Erro de Sincronia</p>
+                <p className="text-[11px] font-black uppercase tracking-widest leading-tight mb-1">Aviso de Configuração</p>
                 <p className="text-[10px] opacity-80 font-medium leading-snug">{errorMsg}</p>
              </div>
-             <button onClick={handleSync} className="px-5 py-2.5 bg-red-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-red-500/20 active:scale-95 transition-all">Forçar Scan</button>
+             <div className="flex flex-col gap-2">
+                <button onClick={handleSync} className="px-5 py-2.5 bg-orange-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-orange-500/20 active:scale-95 transition-all">Tentar Novamente</button>
+             </div>
           </div>
         )}
 
         <div className="flex-1 flex gap-4 overflow-hidden">
-          {/* Contacts Sidebar */}
+          {/* Sidebar de Leads */}
           <div className="w-full md:w-80 flex flex-col gap-3 bg-[#03081a]/50 border border-white/5 rounded-[2.5rem] p-4 overflow-hidden h-full shadow-inner">
             <div className="relative mb-2">
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
                <input 
                 type="text" 
-                placeholder="PROCURAR CONTATO..."
+                placeholder="PROCURAR NO BANCO..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-orange-500 transition-all"
@@ -351,7 +386,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               {filteredLeads.length === 0 && !isSyncing && (
                 <div className="py-20 text-center opacity-20 flex flex-col items-center border border-dashed border-white/10 rounded-[2.5rem] p-8">
                   <Database size={40} className="mb-4 text-slate-500" />
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] leading-relaxed">Banco Vazio.<br/>Tente Sincronizar ou reinicie a instância.</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] leading-relaxed">Cluster Vazio.<br/>Force o Sync ou mande um Oi no celular.</p>
                 </div>
               )}
               {filteredLeads.map(lead => (
@@ -371,7 +406,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             </div>
           </div>
 
-          {/* Chat Section */}
+          {/* Área de Chat */}
           {selectedLead ? (
             <div className="flex-1 flex flex-col bg-[#03081a] border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl relative z-10">
               <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02] backdrop-blur-md">
@@ -382,7 +417,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                    </div>
                    <div>
                       <h3 className="text-sm font-black text-white italic tracking-tighter uppercase leading-none mb-1">{selectedLead.name}</h3>
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Fluxo de Dados: +{selectedLead.phone}</p>
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Canal: {selectedLead.id}</p>
                    </div>
                 </div>
                 <div className="flex gap-3">
@@ -395,7 +430,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center opacity-10">
                       <Activity size={40} className="animate-pulse mb-4" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-center italic">Escaneando Frequência...</p>
+                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-center italic">Escaneando Pacotes...</p>
                    </div>
                  ) : messages.map(msg => (
                    <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
@@ -403,7 +438,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          <div className={`p-4 rounded-3xl text-[13px] font-medium leading-relaxed shadow-xl ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none'}`}>
                             {msg.content}
                          </div>
-                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'SISTEMA' : 'CLIENTE'}</p>
+                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'SYSTEM' : 'CLIENT'}</p>
                       </div>
                    </div>
                  ))}
@@ -416,7 +451,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="INJETAR RESPOSTA NO CANAL..."
+                      placeholder="INJETAR TEXTO NO CANAL..."
                       className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-7 text-sm text-white outline-none focus:border-orange-500 transition-all placeholder:text-slate-800 font-medium shadow-inner"
                     />
                     <button 
@@ -434,8 +469,8 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                <div className="w-24 h-24 bg-white/5 rounded-[2rem] flex items-center justify-center mb-8 shadow-inner border border-white/5">
                  <Globe size={48} className="text-orange-500 animate-pulse" />
                </div>
-               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Uplink Necessário.</h3>
-               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Selecione um contato ou realize a sincronização forçada para monitorar as interações do Docker em tempo real.</p>
+               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Uplink Offline.</h3>
+               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Selecione um contato. Se o banco estiver vazio, verifique se a sincronização do Docker Evolution com o Postgres está ativa.</p>
             </div>
           )}
         </div>
