@@ -40,7 +40,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     return url.replace(/\/$/, "");
   }, [config.evoUrl]);
 
-  // Busca instâncias disponíveis
+  // Busca instâncias disponíveis e seus status reais
   useEffect(() => {
     const fetchInstances = async () => {
       const baseUrl = getBaseUrl();
@@ -66,7 +66,29 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     fetchInstances();
   }, [config.evoKey, getBaseUrl, selectedInstanceName]);
 
-  // Função Robusta para buscar dados - Prioriza V2 e faz fallback para V1
+  // Extrator de Dados de Alta Performance para Evolution v2
+  const extractArrayData = (obj: any): any[] => {
+    if (!obj) return [];
+    if (Array.isArray(obj)) return obj;
+    
+    // Prioridades da V2
+    if (obj.data && Array.isArray(obj.data)) return obj.data;
+    if (obj.records && Array.isArray(obj.records)) return obj.records;
+    if (obj.chats && Array.isArray(obj.chats)) return obj.chats;
+    if (obj.contacts && Array.isArray(obj.contacts)) return obj.contacts;
+
+    // Busca exaustiva
+    for (const key in obj) {
+      if (Array.isArray(obj[key])) {
+        return obj[key];
+      } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+        const nested = extractArrayData(obj[key]);
+        if (nested.length > 0) return nested;
+      }
+    }
+    return [];
+  };
+
   const smartFetch = async (baseUrl: string, instance: string, category: 'chat' | 'contact') => {
     const endpoints = category === 'chat' 
       ? [`/chat/findMany/${instance}`, `/chat/fetchChats/${instance}`]
@@ -74,26 +96,25 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
     for (const endpoint of endpoints) {
       try {
-        console.log(`[WayFlow] Tentando sincronizar via: ${endpoint}`);
         const response = await fetch(`${baseUrl}${endpoint}`, {
           headers: { 'apikey': config.evoKey }
         });
         
-        if (response.status === 404) {
-          console.warn(`[WayFlow] Endpoint ${endpoint} retornou 404. Tentando próximo...`);
-          continue;
-        }
-        
-        if (!response.ok) throw new Error(`Status HTTP: ${response.status}`);
+        if (response.status === 404) continue;
+        if (!response.ok) continue;
 
         const data = await response.json();
-        console.log(`[WayFlow] Sucesso no endpoint: ${endpoint}`, data);
-        return data;
+        const extracted = extractArrayData(data);
+        
+        if (extracted.length > 0) {
+          console.log(`%c[WayFlow] Sucesso via ${endpoint}: ${extracted.length} itens encontrados.`, "color: #22c55e; font-weight: bold;");
+          return extracted;
+        }
       } catch (e) {
-        console.warn(`[WayFlow] Erro ao tentar ${endpoint}:`, e);
+        console.warn(`[WayFlow] Falha no endpoint ${endpoint}:`, e);
       }
     }
-    return null;
+    return [];
   };
 
   const handleSync = useCallback(async () => {
@@ -104,32 +125,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setErrorMsg(null);
     
     try {
-      const chatData = await smartFetch(baseUrl, selectedInstanceName, 'chat');
-      const contactData = await smartFetch(baseUrl, selectedInstanceName, 'contact');
+      // Tenta buscar conversas ativas
+      const rawChats = await smartFetch(baseUrl, selectedInstanceName, 'chat');
+      // Tenta buscar contatos (agenda) como fallback ou complemento
+      const rawContacts = await smartFetch(baseUrl, selectedInstanceName, 'contact');
 
       const leadMap = new Map<string, KanbanLead>();
 
-      // Extrator Inteligente: Busca por arrays dentro do objeto de resposta
-      const extractArray = (data: any) => {
-        if (!data) return [];
-        if (Array.isArray(data)) return data;
-        if (data.data && Array.isArray(data.data)) return data.data;
-        if (data.chats && Array.isArray(data.chats)) return data.chats;
-        if (data.contacts && Array.isArray(data.contacts)) return data.contacts;
-        
-        // Busca a primeira propriedade que seja um array
-        for (const key in data) {
-          if (Array.isArray(data[key])) return data[key];
-        }
-        return [];
-      };
-
-      const rawChats = extractArray(chatData);
-      const rawContacts = extractArray(contactData);
-
-      console.log(`[WayFlow] Sincronização: ${rawChats.length} chats e ${rawContacts.length} contatos encontrados.`);
-
-      // Processar Chats (Conversas Ativas)
+      // Mapear Chats
       rawChats.forEach((chat: any) => {
         const jid = chat.id || chat.remoteJid || chat.jid || (chat.key && chat.key.remoteJid);
         if (!jid || jid.includes('@g.us')) return;
@@ -147,7 +150,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
       });
 
-      // Mesclar com Contatos (Agenda)
+      // Mapear Contatos (apenas os que não estão nos chats)
       rawContacts.forEach((contact: any) => {
         const jid = contact.id || contact.jid || contact.remoteJid;
         if (!jid || jid.includes('@g.us') || leadMap.has(jid)) return;
@@ -156,7 +159,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           id: jid,
           name: contact.name || contact.pushName || jid.split('@')[0],
           phone: jid.split('@')[0].replace(/\D/g, ""),
-          lastMessage: "Novo Lead",
+          lastMessage: "Novo Contato",
           value: 0,
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.name || 'W')}&background=1e293b&color=fff`,
           columnId: 'new',
@@ -168,12 +171,12 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       setLeads(finalLeads);
       
       if (finalLeads.length === 0) {
-        setErrorMsg("A API respondeu, mas não retornou nenhum contato. Verifique se a instância está realmente conectada e possui conversas.");
+        setErrorMsg("API V2 conectada, mas as listas de Chats e Contatos estão vazias. Tente enviar uma mensagem do celular para alguém para 'acordar' o cache da API.");
       } else {
         localStorage.setItem('wayflow_leads_cache', JSON.stringify(finalLeads));
       }
     } catch (error: any) { 
-      setErrorMsg(`Erro Crítico na Sincronização: ${error.message}`);
+      setErrorMsg(`Erro de Rede: ${error.message}`);
     } finally { setIsSyncing(false); }
   }, [selectedInstanceName, config.evoKey, getBaseUrl]);
 
@@ -190,7 +193,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     const baseUrl = getBaseUrl();
     if (!baseUrl) return;
 
-    // Tenta carregar mensagens (V2 prioritário)
+    // Tenta carregar mensagens (v2 findMessages é o padrão)
     const endpoints = [`/chat/findMessages/${selectedInstanceName}`, `/chat/fetchMessages/${selectedInstanceName}`];
     
     for (const endpoint of endpoints) {
@@ -198,27 +201,24 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         const response = await fetch(`${baseUrl}${endpoint}`, {
           method: 'POST',
           headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            where: { remoteJid: lead.id }, 
-            limit: 30 
-          })
+          body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 40 })
         });
         
         if (response.status === 404) continue;
         
         const data = await response.json();
-        const rawMsgs = Array.isArray(data) ? data : (data.data || data.messages || []);
+        const rawMsgs = extractArrayData(data);
 
         const formatted: ChatMessage[] = rawMsgs.map((m: any): ChatMessage => ({
           id: m.key?.id || Math.random().toString(),
           sender: (m.key?.fromMe ? 'agent' : 'user') as 'agent' | 'user',
-          content: m.message?.conversation || m.message?.extendedTextMessage?.text || "Mensagem de Mídia",
+          content: m.message?.conversation || m.message?.extendedTextMessage?.text || m.content || "Mensagem de Mídia",
           timestamp: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         })).reverse();
         
         setMessages(formatted);
         break;
-      } catch (e) { console.error("[WayFlow] Erro ao carregar mensagens:", e); }
+      } catch (e) { console.error(e); }
     }
   };
 
@@ -232,7 +232,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       const response = await fetch(`${baseUrl}/message/sendText/${selectedInstanceName}`, {
         method: 'POST',
         headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: selectedLead.id, text: text })
+        body: JSON.stringify({ number: selectedLead.id, text: text, linkPreview: true })
       });
       if (response.ok) {
         setMessages(prev => [...prev, { 
@@ -241,7 +241,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         }]);
       }
     } catch (e) { 
-      alert("Erro ao enviar mensagem."); 
+      alert("Erro ao enviar."); 
       setNewMessage(text); 
     } finally { setIsSending(false); }
   };
@@ -254,7 +254,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="h-full flex flex-col gap-4 animate-in fade-in duration-500 max-h-[calc(100vh-120px)] overflow-hidden">
         
-        {/* Header de Gestão */}
+        {/* Header Consolidado */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/10 p-4 rounded-3xl shadow-2xl shrink-0">
           <div className="flex items-center gap-4">
              <div className="w-12 h-12 bg-orange-600/20 rounded-2xl flex items-center justify-center text-orange-500 border border-orange-500/20 shadow-lg">
@@ -263,7 +263,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
              <div>
                 <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Central Live.</h1>
                 <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mt-1">
-                  Canal: <span className="text-orange-500">{selectedInstanceName || 'Nenhum'}</span>
+                  Cluster: <span className="text-orange-500">{selectedInstanceName || 'Selecione'}</span>
                 </p>
              </div>
           </div>
@@ -274,7 +274,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                onChange={(e) => setSelectedInstanceName(e.target.value)}
                className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-[10px] text-white font-black uppercase tracking-[0.2em] outline-none cursor-pointer flex-1 md:min-w-[220px] focus:border-orange-500/50 transition-all"
              >
-               {availableInstances.length === 0 && <option>Nenhum canal conectado</option>}
+               {availableInstances.length === 0 && <option>Nenhum node ativo</option>}
                {availableInstances.map(inst => (
                  <option key={inst.id} value={inst.instanceName || inst.name}>🟢 {inst.instanceName || inst.name}</option>
                ))}
@@ -286,26 +286,26 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               className="px-8 py-3 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-3 transition-all shadow-xl shadow-orange-600/20 active:scale-95"
              >
                 {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} 
-                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+                {isSyncing ? 'Buscando...' : 'Atualizar Dados'}
              </button>
           </div>
         </div>
 
         {errorMsg && (
-          <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3 text-red-500 animate-in slide-in-from-top-2">
+          <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-2xl flex items-center gap-3 text-orange-500 animate-in slide-in-from-top-2">
              <AlertTriangle size={18} />
-             <p className="text-[10px] font-black uppercase tracking-widest">{errorMsg}</p>
+             <p className="text-[10px] font-black uppercase tracking-widest leading-tight">{errorMsg}</p>
           </div>
         )}
 
         <div className="flex-1 flex gap-4 overflow-hidden">
-          {/* Sidebar de Leads */}
+          {/* Listagem Neural de Leads */}
           <div className="w-full md:w-80 flex flex-col gap-3 bg-[#03081a]/50 border border-white/5 rounded-[2.5rem] p-4 overflow-hidden h-full shadow-inner">
             <div className="relative mb-2">
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
                <input 
                 type="text" 
-                placeholder="FILTRAR LEADS..."
+                placeholder="FILTRAR NOME/FONE..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 pl-10 pr-4 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-orange-500/50 transition-all"
@@ -316,7 +316,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               {filteredLeads.length === 0 && !isSyncing && (
                 <div className="py-20 text-center opacity-20 flex flex-col items-center border border-dashed border-white/10 rounded-3xl p-6">
                   <Users size={32} className="mb-4 text-slate-500" />
-                  <p className="text-[9px] font-black uppercase tracking-widest leading-relaxed">Nenhum contato ativo <br/>no canal {selectedInstanceName}</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest leading-relaxed">Nenhum rastro neural <br/>encontrado no cluster.</p>
                 </div>
               )}
               {filteredLeads.map(lead => (
@@ -336,7 +336,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             </div>
           </div>
 
-          {/* Interface do Chat */}
+          {/* Interface de Diálogo */}
           {selectedLead ? (
             <div className="flex-1 flex flex-col bg-[#03081a] border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl relative z-10">
               <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
@@ -360,7 +360,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center opacity-10">
                       <Loader2 size={40} className="animate-spin mb-4" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center">Iniciando Stream de Conversa...</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-center italic">Escaneando histórico de mensagens...</p>
                    </div>
                  ) : messages.map(msg => (
                    <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
@@ -368,7 +368,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          <div className={`p-4 rounded-3xl text-[13px] font-medium leading-relaxed shadow-xl ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none'}`}>
                             {msg.content}
                          </div>
-                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'SISTEMA' : 'CLIENTE'}</p>
+                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'SYSTEM' : 'CUSTOMER'}</p>
                       </div>
                    </div>
                  ))}
@@ -381,7 +381,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="ESCREVA SUA RESPOSTA..."
+                      placeholder="INSIRA SUA RESPOSTA..."
                       className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-6 text-sm text-white outline-none focus:border-orange-500/50 transition-all placeholder:text-slate-800 font-medium"
                     />
                     <button 
@@ -399,8 +399,8 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-8 shadow-inner">
                  <MessageSquare size={48} className="text-orange-500" />
                </div>
-               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Núcleo de Atendimento.</h3>
-               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Selecione um lead ao lado para visualizar o fluxo neural de mensagens.</p>
+               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Fluxo de Dados Offline.</h3>
+               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Selecione um ponto de contato para abrir a ponte de comunicação.</p>
             </div>
           )}
         </div>
