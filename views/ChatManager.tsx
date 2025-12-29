@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  MessageSquare, Users, Loader2, RefreshCw, Send, Paperclip, Phone, MoreHorizontal, UserCircle, Search, AlertTriangle, ShieldCheck, Database, Terminal, Zap
+  MessageSquare, Users, Loader2, RefreshCw, Send, Paperclip, Phone, MoreHorizontal, UserCircle, Search, AlertTriangle, ShieldCheck, Database, Terminal, Zap, Globe, WifiOff
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView, KanbanLead, ChatMessage } from '../types.ts';
@@ -30,7 +30,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
   const addLog = (msg: string) => {
     console.log(`[WayFlow Engine] ${msg}`);
-    setDebugLog(prev => [msg, ...prev].slice(0, 5));
+    setDebugLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 8));
   };
 
   useEffect(() => {
@@ -64,44 +64,53 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       if (connected.length > 0 && !selectedInstanceName) {
         setSelectedInstanceName(connected[0].instanceName || connected[0].name);
       }
-    } catch (e) { addLog("Erro ao buscar instâncias."); }
+    } catch (e) { 
+      addLog("Falha ao comunicar com o servidor de instâncias."); 
+    }
   }, [config.evoKey, getBaseUrl, selectedInstanceName]);
 
   useEffect(() => {
     fetchInstances();
   }, [fetchInstances]);
 
-  // Extrator de Dados Ultra-Resiliente
   const findDataArray = (obj: any): any[] => {
     if (!obj) return [];
     if (Array.isArray(obj)) return obj;
-    
-    // Caminhos comuns Evolution v2
     const paths = [
-      obj.records,
-      obj.data,
-      obj.chats,
-      obj.contacts,
-      obj.instance?.chats,
-      obj.instance?.contacts,
-      obj.data?.records,
-      obj.data?.chats
+      obj.records, obj.data, obj.chats, obj.contacts,
+      obj.instance?.chats, obj.instance?.contacts,
+      obj.data?.records, obj.data?.chats
     ];
-
     for (const path of paths) {
       if (Array.isArray(path)) return path;
     }
-
-    // Busca recursiva profunda em 1 nível
     for (const key in obj) {
       if (Array.isArray(obj[key])) return obj[key];
-      if (obj[key] && typeof obj[key] === 'object') {
-         for (const subKey in obj[key]) {
-            if (Array.isArray(obj[key][subKey])) return obj[key][subKey];
-         }
-      }
     }
     return [];
+  };
+
+  // Fixed performFetch to accept an optional options object
+  const performFetch = async (endpoint: string, options: RequestInit = {}) => {
+    const baseUrl = getBaseUrl();
+    try {
+      const res = await fetch(endpoint, {
+        ...options,
+        headers: { 
+          'apikey': config.evoKey, 
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        },
+        mode: 'cors'
+      });
+      if (!res.ok) throw new Error(`Status ${res.status}: ${res.statusText}`);
+      return await res.json();
+    } catch (e: any) {
+      if (e.message.includes('Failed to fetch')) {
+        throw new Error("Erro de Rede (CORS ou URL Incorreta). A API não respondeu à requisição.");
+      }
+      throw e;
+    }
   };
 
   const handleSync = useCallback(async () => {
@@ -110,79 +119,53 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     
     setIsSyncing(true);
     setErrorMsg(null);
-    addLog(`Scanning Node: ${selectedInstanceName}...`);
+    setLeads([]); // Limpa para mostrar que está carregando
+    addLog(`Iniciando Handshake com ${selectedInstanceName}...`);
     
     try {
-      // 0. Verificar se a instância ainda está conectada
-      const stateResp = await fetch(`${baseUrl}/instance/connectionState/${selectedInstanceName}`, {
-        headers: { 'apikey': config.evoKey }
-      });
-      const stateData = await stateResp.json();
-      const isConnected = stateData.instance?.state === 'open' || stateData.state === 'open' || stateData.instance?.connectionStatus === 'CONNECTED';
+      // 1. Validar Conexão
+      addLog("Checando estado da pulsação...");
+      const stateData = await performFetch(`${baseUrl}/instance/connectionState/${selectedInstanceName}`);
+      const isConnected = stateData.instance?.state === 'open' || stateData.state === 'open';
 
       if (!isConnected) {
-        throw new Error("Instância desconectada. Re-escaneie o QR Code nas Configurações.");
+        throw new Error("Instância não está em modo 'OPEN'. Reconecte o WhatsApp.");
       }
 
-      // 1. Tentar múltiplos endpoints de Chat
-      const chatEndpoints = [
-        `${baseUrl}/chat/findMany/${selectedInstanceName}`,
-        `${baseUrl}/chat/findMany/${selectedInstanceName}?limit=100`
-      ];
+      // 2. Disparar Gatilho de Sincronia (Fetch)
+      addLog("Disparando gatilhos de sincronização no servidor...");
+      await fetch(`${baseUrl}/chat/fetchChats/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } }).catch(()=>{});
+      await fetch(`${baseUrl}/contact/fetchContacts/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } }).catch(()=>{});
 
-      let allChats: any[] = [];
-      for (const endpoint of chatEndpoints) {
-        const res = await fetch(endpoint, { headers: { 'apikey': config.evoKey } });
-        const json = await res.json();
-        const found = findDataArray(json);
-        if (found.length > 0) {
-          allChats = found;
-          break;
-        }
-      }
-
-      // 2. Tentar múltiplos endpoints de Contatos
-      const contactEndpoints = [
-        `${baseUrl}/contact/findMany/${selectedInstanceName}`,
-        `${baseUrl}/contact/findMany/${selectedInstanceName}?limit=100`
-      ];
-
-      let allContacts: any[] = [];
-      for (const endpoint of contactEndpoints) {
-        const res = await fetch(endpoint, { headers: { 'apikey': config.evoKey } });
-        const json = await res.json();
-        const found = findDataArray(json);
-        if (found.length > 0) {
-          allContacts = found;
-          break;
-        }
-      }
-
-      // 3. FALLBACK: Se tudo falhar, forçar o fetch do celular
-      if (allChats.length === 0 && allContacts.length === 0) {
-        addLog("Nenhum dado no banco. Solicitando sincronização forçada via WhatsApp Web...");
-        await fetch(`${baseUrl}/chat/fetchChats/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } });
-        await fetch(`${baseUrl}/contact/fetchContacts/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } });
+      // 3. Motor de Polling (Tenta 4 vezes com intervalo)
+      let finalChats: any[] = [];
+      let finalContacts: any[] = [];
+      
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        addLog(`Varredura do Banco: Tentativa ${attempt}/4...`);
         
-        addLog("Aguardando resposta do rádio (6s)...");
-        await new Promise(r => setTimeout(r, 6000));
+        const chatData = await performFetch(`${baseUrl}/chat/findMany/${selectedInstanceName}`);
+        finalChats = findDataArray(chatData);
         
-        // Re-tentativa final após o fetch
-        const finalResp = await fetch(`${baseUrl}/chat/findMany/${selectedInstanceName}`, { headers: { 'apikey': config.evoKey } });
-        allChats = findDataArray(await finalResp.json());
+        const contactData = await performFetch(`${baseUrl}/contact/findMany/${selectedInstanceName}`);
+        finalContacts = findDataArray(contactData);
+
+        if (finalChats.length > 0 || finalContacts.length > 0) break;
+        
+        addLog("Banco vazio. Aguardando processamento da API (3s)...");
+        await new Promise(r => setTimeout(r, 3000));
       }
 
       const leadMap = new Map<string, KanbanLead>();
 
-      // Unificar Chats e Contatos
-      allChats.forEach((chat: any) => {
-        const jid = chat.id || chat.remoteJid || chat.jid || (chat.key && chat.key.remoteJid);
+      finalChats.forEach((chat: any) => {
+        const jid = chat.id || chat.remoteJid || chat.jid || chat.key?.remoteJid;
         if (!jid || jid.includes('@g.us')) return;
         leadMap.set(jid, {
           id: jid,
           name: chat.name || chat.pushName || jid.split('@')[0],
           phone: jid.split('@')[0].replace(/\D/g, ""),
-          lastMessage: chat.lastMessage?.message?.conversation || chat.lastMessage?.content || "Conversa Ativa",
+          lastMessage: chat.lastMessage?.message?.conversation || "Conversa Ativa",
           value: 0,
           avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(chat.name || 'W')}&background=f59e0b&color=fff`,
           columnId: 'ai_processing',
@@ -191,7 +174,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
       });
 
-      allContacts.forEach((contact: any) => {
+      finalContacts.forEach((contact: any) => {
         const jid = contact.id || contact.jid || contact.remoteJid;
         if (!jid || jid.includes('@g.us') || leadMap.has(jid)) return;
         leadMap.set(jid, {
@@ -210,15 +193,15 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       setLeads(finalLeads);
       
       if (finalLeads.length === 0) {
-        addLog("Status: Conectado, mas banco de dados vazio.");
-        setErrorMsg("A instância está 'OPEN', mas não há conversas no banco de dados da API. Como você enviou mensagens recentemente, aguarde 30 segundos para que a API sincronize e tente novamente. Se persistir, reinicie a instância no servidor.");
+        addLog("Conexão OK, mas nenhum dado retornado.");
+        setErrorMsg("A API respondeu com sucesso, mas o seu WhatsApp não enviou contatos. Dica: Envie uma mensagem pelo seu celular para qualquer pessoa; isso forçará a API a registrar a conversa.");
       } else {
-        addLog(`Transmissão OK: ${finalLeads.length} contatos mapeados.`);
+        addLog(`Sucesso: ${finalLeads.length} registros mapeados.`);
         localStorage.setItem('wayflow_leads_cache', JSON.stringify(finalLeads));
       }
     } catch (error: any) { 
-      setErrorMsg(`Falha Neural: ${error.message}`);
-      addLog(`Erro: ${error.message}`);
+      addLog(`FALHA CRÍTICA: ${error.message}`);
+      setErrorMsg(error.message);
     } finally { setIsSyncing(false); }
   }, [selectedInstanceName, config.evoKey, getBaseUrl]);
 
@@ -233,27 +216,22 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setSelectedLead(lead);
     setMessages([]);
     const baseUrl = getBaseUrl();
-    if (!baseUrl) return;
-
     try {
-      const response = await fetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
+      const data = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
         method: 'POST',
         headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 50 })
-      });
+      } as any);
       
-      const data = await response.json();
       const rawMsgs = findDataArray(data);
-
       const formatted: ChatMessage[] = rawMsgs.map((m: any): ChatMessage => ({
         id: m.key?.id || Math.random().toString(),
         sender: (m.key?.fromMe ? 'agent' : 'user') as 'agent' | 'user',
-        content: m.message?.conversation || m.message?.extendedTextMessage?.text || m.content || "Mídia/Anexo",
+        content: m.message?.conversation || m.message?.extendedTextMessage?.text || m.content || "Anexo/Mídia",
         timestamp: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })).reverse();
-      
       setMessages(formatted);
-    } catch (e) { addLog("Erro ao ler histórico."); }
+    } catch (e) { addLog("Erro ao baixar histórico."); }
   };
 
   const sendMessage = async () => {
@@ -263,21 +241,16 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setNewMessage('');
     const baseUrl = getBaseUrl();
     try {
-      const response = await fetch(`${baseUrl}/message/sendText/${selectedInstanceName}`, {
+      await fetch(`${baseUrl}/message/sendText/${selectedInstanceName}`, {
         method: 'POST',
         headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' },
         body: JSON.stringify({ number: selectedLead.id, text: text, delay: 1000 })
       });
-      if (response.ok) {
-        setMessages(prev => [...prev, { 
-          id: Math.random().toString(), sender: 'agent', content: text, 
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-        }]);
-      }
-    } catch (e) { 
-      alert("Erro no uplink."); 
-      setNewMessage(text); 
-    } finally { setIsSending(false); }
+      setMessages(prev => [...prev, { 
+        id: Math.random().toString(), sender: 'agent', content: text, 
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      }]);
+    } catch (e) { alert("Falha no Uplink."); setNewMessage(text); } finally { setIsSending(false); }
   };
 
   const filteredLeads = leads.filter(l => 
@@ -288,16 +261,16 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="h-full flex flex-col gap-4 animate-in fade-in duration-500 max-h-[calc(100vh-120px)] overflow-hidden">
         
-        {/* Painel de Comando Refinado */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/10 p-4 rounded-3xl shadow-2xl shrink-0">
+        {/* Header - Centro de Comando */}
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/10 p-5 rounded-3xl shadow-2xl shrink-0">
           <div className="flex items-center gap-4">
              <div className="w-12 h-12 bg-orange-600/20 rounded-2xl flex items-center justify-center text-orange-500 border border-orange-500/20 shadow-lg">
                 <Zap size={24} />
              </div>
              <div>
-                <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Fluxo de Dados.</h1>
+                <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Canal Live.</h1>
                 <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mt-1">
-                  Cluster: <span className="text-orange-500">{selectedInstanceName || 'Offline'}</span>
+                  Transmissão: <span className="text-orange-500">{selectedInstanceName || 'Offline'}</span>
                 </p>
              </div>
           </div>
@@ -308,7 +281,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                onChange={(e) => setSelectedInstanceName(e.target.value)}
                className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-[10px] text-white font-black uppercase tracking-[0.2em] outline-none cursor-pointer flex-1 md:min-w-[220px] focus:border-orange-500/50 transition-all appearance-none"
              >
-               {availableInstances.length === 0 && <option>Nenhuma Instância Detectada</option>}
+               {availableInstances.length === 0 && <option>Nenhum Node Encontrado</option>}
                {availableInstances.map(inst => (
                  <option key={inst.id} value={inst.instanceName || inst.name}>📡 {inst.instanceName || inst.name}</option>
                ))}
@@ -320,55 +293,56 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               className="px-8 py-3 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-3 transition-all shadow-xl shadow-orange-600/20 active:scale-95"
              >
                 {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} 
-                {isSyncing ? 'Varrendo...' : 'Sincronizar'}
+                {isSyncing ? 'Varrendo Rede...' : 'Sincronizar'}
              </button>
           </div>
         </div>
 
-        {/* Terminal de Diagnóstico em Tempo Real */}
-        <div className="bg-slate-950 border border-white/5 rounded-2xl p-3 flex flex-col gap-1 overflow-hidden shrink-0">
-            <div className="flex items-center gap-2 mb-1">
-                <Terminal size={10} className="text-orange-500" />
-                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Protocolo WayFlow Diagnostic</span>
+        {/* Console WayFlow Diagnostic */}
+        <div className="bg-black/80 border border-white/5 rounded-2xl p-4 flex flex-col gap-1 overflow-hidden shrink-0 shadow-inner">
+            <div className="flex items-center gap-2 mb-2 border-b border-white/5 pb-2">
+                <Terminal size={12} className="text-orange-500" />
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Protocolo de Comunicação WayFlow</span>
             </div>
             {debugLog.length === 0 ? (
-               <p className="text-[9px] font-mono text-slate-800 italic">Aguardando comando de sincronia...</p>
+               <p className="text-[10px] font-mono text-slate-700 italic">Pronto para operação...</p>
             ) : debugLog.map((log, i) => (
-              <p key={i} className={`text-[9px] font-mono ${i === 0 ? 'text-orange-400' : 'text-slate-600'} truncate`}>
+              <p key={i} className={`text-[10px] font-mono ${i === 0 ? 'text-orange-400 animate-pulse' : 'text-slate-600'} truncate`}>
                 {i === 0 ? '>> ' : ''}{log}
               </p>
             ))}
         </div>
 
         {errorMsg && (
-          <div className="bg-red-500/10 border border-red-500/20 p-5 rounded-3xl flex items-center gap-4 text-red-500 animate-in slide-in-from-top-2">
-             <AlertTriangle size={24} className="shrink-0" />
+          <div className="bg-red-500/10 border border-red-500/20 p-5 rounded-3xl flex items-center gap-5 text-red-500 animate-in slide-in-from-top-2 shadow-lg">
+             <WifiOff size={28} className="shrink-0" />
              <div className="flex-1">
-                <p className="text-[10px] font-black uppercase tracking-widest leading-tight">{errorMsg}</p>
+                <p className="text-[11px] font-black uppercase tracking-widest leading-tight mb-1">A API não respondeu corretamente</p>
+                <p className="text-[10px] opacity-70 font-medium leading-snug">{errorMsg}</p>
              </div>
-             <button onClick={handleSync} className="px-4 py-2 bg-red-500 text-white rounded-xl text-[8px] font-black uppercase tracking-widest">Forçar Re-Uplink</button>
+             <button onClick={handleSync} className="px-5 py-2.5 bg-red-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-red-500/20 active:scale-95 transition-all">Tentar Re-Uplink</button>
           </div>
         )}
 
         <div className="flex-1 flex gap-4 overflow-hidden">
-          {/* Listagem Neural de Leads */}
+          {/* Sidebar de Leads */}
           <div className="w-full md:w-80 flex flex-col gap-3 bg-[#03081a]/50 border border-white/5 rounded-[2.5rem] p-4 overflow-hidden h-full shadow-inner">
             <div className="relative mb-2">
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
                <input 
                 type="text" 
-                placeholder="PROCURAR NO BANCO..."
+                placeholder="PROCURAR NO CLUSTER..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 pl-10 pr-4 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-orange-500/50 transition-all"
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-orange-500 transition-all"
                />
             </div>
 
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1">
               {filteredLeads.length === 0 && !isSyncing && (
-                <div className="py-20 text-center opacity-20 flex flex-col items-center border border-dashed border-white/10 rounded-3xl p-6">
-                  <Database size={32} className="mb-4 text-slate-500" />
-                  <p className="text-[9px] font-black uppercase tracking-widest leading-relaxed">Cluster Vazio.<br/>Verifique se a instância<br/>possui conversas ativas.</p>
+                <div className="py-20 text-center opacity-20 flex flex-col items-center border border-dashed border-white/10 rounded-[2.5rem] p-8">
+                  <Database size={40} className="mb-4 text-slate-500" />
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] leading-relaxed">Cluster Vazio.<br/>Verifique a conexão<br/>e clique em Sincronizar.</p>
                 </div>
               )}
               {filteredLeads.map(lead => (
@@ -377,34 +351,34 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                   onClick={() => loadChat(lead)}
                   className={`p-4 rounded-2xl border transition-all cursor-pointer group flex items-center gap-4 ${selectedLead?.id === lead.id ? 'bg-orange-600/20 border-orange-500/30 shadow-[0_10px_30px_rgba(234,88,12,0.1)]' : 'bg-white/[0.02] border-white/5 hover:border-white/20'}`}
                 >
-                  <img src={lead.avatar} className="w-10 h-10 rounded-xl border border-white/10 shrink-0" alt="" />
+                  <img src={lead.avatar} className="w-10 h-10 rounded-xl border border-white/10 shrink-0 shadow-lg" alt="" />
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-white font-black text-[11px] truncate uppercase italic">{lead.name}</h4>
+                    <h4 className="text-white font-black text-[11px] truncate uppercase italic tracking-tight">{lead.name}</h4>
                     <p className="text-[9px] text-slate-600 font-bold">+{lead.phone}</p>
                   </div>
-                  {lead.unreadCount > 0 && <div className="w-5 h-5 bg-orange-600 rounded-full flex items-center justify-center text-[8px] font-black text-white">{lead.unreadCount}</div>}
+                  {lead.unreadCount > 0 && <div className="w-5 h-5 bg-orange-600 rounded-full flex items-center justify-center text-[8px] font-black text-white shadow-lg shadow-orange-600/30">{lead.unreadCount}</div>}
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Interface de Diálogo Neural */}
+          {/* Chat Principal */}
           {selectedLead ? (
             <div className="flex-1 flex flex-col bg-[#03081a] border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl relative z-10">
-              <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+              <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02] backdrop-blur-md">
                 <div className="flex items-center gap-4">
                    <div className="relative">
-                      <img src={selectedLead.avatar} className="w-12 h-12 rounded-2xl border border-white/10 shadow-lg" alt="" />
-                      <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#03081a] shadow-[0_0_8px_#10b981]" />
+                      <img src={selectedLead.avatar} className="w-12 h-12 rounded-2xl border border-white/10 shadow-xl" alt="" />
+                      <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#03081a] shadow-[0_0_10px_#10b981]" />
                    </div>
                    <div>
                       <h3 className="text-sm font-black text-white italic tracking-tighter uppercase leading-none mb-1">{selectedLead.name}</h3>
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Node ID: +{selectedLead.phone}</p>
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Fluxo: +{selectedLead.phone}</p>
                    </div>
                 </div>
-                <div className="flex gap-2">
-                   <button className="p-3 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-all"><Phone size={18} /></button>
-                   <button className="p-3 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-all"><MoreHorizontal size={18} /></button>
+                <div className="flex gap-3">
+                   <button className="p-3 bg-white/5 rounded-xl text-slate-500 hover:text-white hover:bg-white/10 transition-all"><Phone size={18} /></button>
+                   <button className="p-3 bg-white/5 rounded-xl text-slate-500 hover:text-white hover:bg-white/10 transition-all"><MoreHorizontal size={18} /></button>
                 </div>
               </div>
 
@@ -412,7 +386,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center opacity-10">
                       <Loader2 size={40} className="animate-spin mb-4" />
-                      <p className="text-[10px] font-black uppercase tracking-widest text-center italic">Escaneando Transmissão...</p>
+                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-center italic">Sintonizando Frequência...</p>
                    </div>
                  ) : messages.map(msg => (
                    <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
@@ -420,26 +394,26 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                          <div className={`p-4 rounded-3xl text-[13px] font-medium leading-relaxed shadow-xl ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none'}`}>
                             {msg.content}
                          </div>
-                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'WAYFLOW AGENT' : 'LEAD DATA'}</p>
+                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'WAYFLOW TRANSMISSION' : 'DATA INPUT'}</p>
                       </div>
                    </div>
                  ))}
               </div>
 
-              <div className="p-6 bg-white/[0.01] border-t border-white/5">
+              <div className="p-6 bg-white/[0.01] border-t border-white/5 backdrop-blur-md">
                  <div className="flex items-center gap-4">
                     <button className="p-4 bg-white/5 rounded-2xl text-slate-500 hover:text-white transition-all"><Paperclip size={20} /></button>
                     <input 
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="INJETAR RESPOSTA..."
-                      className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-6 text-sm text-white outline-none focus:border-orange-500/50 transition-all placeholder:text-slate-800 font-medium"
+                      placeholder="INJETAR MENSAGEM NO FLUXO..."
+                      className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-7 text-sm text-white outline-none focus:border-orange-500 transition-all placeholder:text-slate-800 font-medium shadow-inner"
                     />
                     <button 
                       onClick={sendMessage} 
                       disabled={!newMessage.trim() || isSending} 
-                      className="p-5 bg-orange-600 text-white rounded-2xl shadow-2xl hover:bg-orange-500 disabled:opacity-50 transition-all active:scale-95"
+                      className="p-5 bg-orange-600 text-white rounded-2xl shadow-2xl hover:bg-orange-500 disabled:opacity-50 transition-all active:scale-95 shadow-orange-600/30"
                     >
                        {isSending ? <Loader2 size={24} className="animate-spin" /> : <Send size={24} />}
                     </button>
@@ -448,11 +422,11 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-[4rem] opacity-30 text-center p-20 bg-white/[0.01]">
-               <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center mb-8 shadow-inner border border-white/5">
-                 <MessageSquare size={48} className="text-orange-500" />
+               <div className="w-24 h-24 bg-white/5 rounded-[2rem] flex items-center justify-center mb-8 shadow-inner border border-white/5">
+                 <Globe size={48} className="text-orange-500 animate-pulse" />
                </div>
-               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Aguardando Conexão.</h3>
-               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Sincronize o cluster e selecione um canal para iniciar a monitoração neural.</p>
+               <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Aguardando Uplink.</h3>
+               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm leading-relaxed">Conecte-se ao cluster para monitorar as transmissões em tempo real.</p>
             </div>
           )}
         </div>
