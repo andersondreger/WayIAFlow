@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  MessageSquare, Users, Loader2, RefreshCw, Send, Search, AlertTriangle, Zap, Globe, Smartphone, ShieldCheck
+  MessageSquare, Users, Loader2, RefreshCw, Send, Search, AlertTriangle, Zap, Globe, ShieldCheck
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView, KanbanLead, ChatMessage } from '../types.ts';
@@ -55,23 +55,24 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       
       const data = await res.json().catch(() => null);
 
-      // Tratamento do erro P2000 (Database Column too long) detectado no seu log
-      if (data?.message?.includes('P2000') || JSON.stringify(data).includes('too long')) {
-        console.warn("Evolution Database Error P2000: Ignorando registro corrompido.");
-        return { records: [], data: [] }; 
+      // Tratamento agressivo do erro P2000 detectado nos logs
+      if (data?.message?.includes('P2000') || JSON.stringify(data).includes('too long') || res.status === 500) {
+        console.warn("Evolution API P2000/500 detectado. Tentando recuperar dados parciais...");
+        return null; 
       }
 
       if (!res.ok) throw new Error(data?.message || `Erro ${res.status}`);
       return data;
     } catch (e: any) {
-      throw e;
+      console.error("Fetch Error:", e);
+      return null;
     }
   };
 
   const handleSync = useCallback(async () => {
     const baseUrl = getCleanUrl();
     if (!selectedInstanceName || !baseUrl || !config.evoKey) {
-      setErrorMsg("Configure a API em 'Integrações' primeiro.");
+      setErrorMsg("Configure a API primeiro.");
       return;
     }
     
@@ -80,35 +81,52 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setLeads([]);
     
     try {
+      // 1. Verificar conexão
       const stateData = await performFetch(`${baseUrl}/instance/connectionState/${selectedInstanceName}`);
+      if (!stateData) throw new Error("Não foi possível validar o estado da instância.");
+      
       const state = stateData.instance?.state || stateData.state;
-
       if (state !== 'open' && state !== 'CONNECTED') {
-        throw new Error("Sua instância do WhatsApp está desconectada.");
+        throw new Error("Instância desconectada. Reescaneie o QR Code.");
       }
 
-      const msgData = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
+      // 2. Tentar buscar CHATS primeiro (é mais resiliente ao erro P2000 do que mensagens)
+      let chatData = await performFetch(`${baseUrl}/chat/findChats/${selectedInstanceName}`, {
         method: 'POST',
-        body: JSON.stringify({ where: {}, limit: 100 })
+        body: JSON.stringify({ where: {}, limit: 50 })
       });
+
+      // 3. Se chats falhar, tenta mensagens como fallback
+      if (!chatData) {
+        chatData = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
+          method: 'POST',
+          body: JSON.stringify({ where: {}, limit: 50 })
+        });
+      }
+
+      const records = Array.isArray(chatData) ? chatData : (chatData?.records || chatData?.data || []);
       
-      const records = Array.isArray(msgData) ? msgData : (msgData.records || msgData.data || []);
+      if (records.length === 0) {
+        setErrorMsg("Nenhum dado retornado. O servidor Evolution pode estar processando o histórico.");
+        return;
+      }
+
       let leadsMap = new Map<string, KanbanLead>();
 
       records.forEach((m: any) => {
-        const key = m.key || m;
-        const jid = key.remoteJid;
-        if (jid && !jid.includes('@g.us') && !key.fromMe) {
+        const jid = m.id || m.remoteJid || m.key?.remoteJid;
+        if (jid && !jid.includes('@g.us')) {
           const cleanJid = jid.split(':')[0].split('@')[0] + '@s.whatsapp.net';
+          const phone = cleanJid.split('@')[0];
+          
           if (!leadsMap.has(cleanJid)) {
-            const phone = cleanJid.split('@')[0];
             leadsMap.set(cleanJid, {
               id: cleanJid,
-              name: m.pushName || `Cliente ${phone}`,
+              name: m.name || m.pushName || `Cliente ${phone}`,
               phone: phone,
-              lastMessage: m.message?.conversation || m.message?.extendedTextMessage?.text || "Mensagem de mídia",
+              lastMessage: m.lastMessage?.message?.conversation || m.message?.conversation || "Conversa ativa",
               value: 0,
-              avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(m.pushName || phone)}&background=f59e0b&color=fff`,
+              avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name || phone)}&background=f59e0b&color=fff`,
               columnId: 'ai_processing',
               status: 'online'
             });
@@ -116,7 +134,13 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         }
       });
 
-      setLeads(Array.from(leadsMap.values()));
+      const finalLeads = Array.from(leadsMap.values());
+      setLeads(finalLeads);
+      
+      if (finalLeads.length === 0) {
+         setErrorMsg("A API respondeu, mas não encontrou conversas privadas.");
+      }
+
     } catch (e: any) {
       setErrorMsg(e.message);
     } finally {
@@ -138,9 +162,11 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         });
         setAvailableInstances(connected);
         if (connected.length > 0 && !selectedInstanceName) {
-          setSelectedInstanceName(connected[0].instanceName || connected[0].name);
+          const firstInst = connected[0].instanceName || connected[0].name;
+          setSelectedInstanceName(firstInst);
+          localStorage.setItem('wayflow_last_instance', firstInst);
         }
-      } catch (e) { console.error("Erro ao buscar instâncias"); }
+      } catch (e) { console.error("Erro instâncias"); }
     };
     fetchInstances();
   }, [config.evoKey, getCleanUrl, selectedInstanceName]);
@@ -151,17 +177,19 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     try {
       const data = await performFetch(`${getCleanUrl()}/chat/findMessages/${selectedInstanceName}`, {
         method: 'POST',
-        body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 50 })
+        body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 40 })
       });
+      if (!data) return;
+      
       const records = Array.isArray(data) ? data : (data.records || data.data || []);
       const formatted: ChatMessage[] = records.map((m: any): ChatMessage => ({
         id: m.key?.id || Math.random().toString(),
         sender: (m.key?.fromMe ? 'agent' : 'user'),
-        content: m.message?.conversation || m.message?.extendedTextMessage?.text || "[Mídia/Arquivo]",
+        content: m.message?.conversation || m.message?.extendedTextMessage?.text || "[Mídia]",
         timestamp: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       })).reverse();
       setMessages(formatted);
-    } catch (e) { console.error("Erro ao carregar mensagens"); }
+    } catch (e) { console.error("Erro mensagens"); }
   };
 
   const sendMessage = async () => {
@@ -170,13 +198,17 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     const text = newMessage;
     setNewMessage('');
     try {
-      await performFetch(`${getCleanUrl()}/message/sendText/${selectedInstanceName}`, {
+      const res = await performFetch(`${getCleanUrl()}/message/sendText/${selectedInstanceName}`, {
         method: 'POST',
         body: JSON.stringify({ number: selectedLead.id, text, delay: 1000 })
       });
-      setMessages(prev => [...prev, { id: Math.random().toString(), sender: 'agent', content: text, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      if (res) {
+        setMessages(prev => [...prev, { id: Math.random().toString(), sender: 'agent', content: text, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      } else {
+        throw new Error("Falha no envio");
+      }
     } catch (e) { 
-      alert("Erro ao enviar mensagem."); 
+      alert("Erro ao enviar. Verifique a conexão do celular."); 
       setNewMessage(text); 
     } finally { 
       setIsSending(false); 
@@ -187,11 +219,11 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="h-full flex flex-col gap-6 overflow-hidden">
         
-        {/* Toolbar Superior - Estilo Premium */}
+        {/* Barra de Controle Premium */}
         <div className="bg-[#03081a] border border-white/10 p-6 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl">
           <div className="flex items-center gap-4">
              <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
-                <MessageSquare size={24} />
+                <Zap size={24} />
              </div>
              <div>
                 <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Commander Center</h1>
@@ -209,7 +241,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                {availableInstances.map(i => <option key={i.id} value={i.instanceName || i.name}>📡 {i.instanceName || i.name}</option>)}
              </select>
              <button onClick={handleSync} disabled={isSyncing} className="px-10 py-3.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 shadow-xl transition-all active:scale-95">
-                {isSyncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Sincronizar
+                {isSyncing ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Sincronizar Leads
              </button>
           </div>
         </div>
@@ -218,14 +250,13 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           <div className="bg-red-500/10 border border-red-500/20 p-5 rounded-[2rem] flex items-center gap-4 text-red-500 animate-in slide-in-from-top-2">
              <AlertTriangle size={20} className="shrink-0" />
              <div className="flex-1">
-               <p className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">Atenção ao Handshake</p>
+               <p className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">Erro de Sincronismo</p>
                <p className="text-[11px] opacity-80 leading-snug">{errorMsg}</p>
              </div>
-             <button onClick={handleSync} className="px-5 py-2 bg-orange-600 text-white rounded-xl text-[9px] font-black uppercase">Re-Scan</button>
+             <button onClick={handleSync} className="px-5 py-2 bg-orange-600 text-white rounded-xl text-[9px] font-black uppercase">Tentar Novamente</button>
           </div>
         )}
 
-        {/* Chat Main Area */}
         <div className="flex-1 flex gap-6 overflow-hidden">
           {/* Sidebar de Leads */}
           <div className="w-full md:w-85 flex flex-col gap-4 bg-[#03081a]/50 border border-white/5 rounded-[3rem] p-5 h-full overflow-hidden">
@@ -233,7 +264,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-700" size={16} />
                <input 
                  type="text" 
-                 placeholder="PESQUISAR CLIENTE..." 
+                 placeholder="FILTRAR CLIENTES..." 
                  value={searchTerm} 
                  onChange={(e) => setSearchTerm(e.target.value)} 
                  className="w-full bg-slate-950 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-[10px] text-white font-black uppercase tracking-widest outline-none focus:border-orange-500/50 transition-all placeholder:text-slate-800"
@@ -279,7 +310,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                 <div className="flex gap-2">
                    <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/5 flex items-center gap-2">
                       <ShieldCheck size={14} className="text-orange-500" />
-                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Criptografia Ativa</span>
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Proteção Ativa</span>
                    </div>
                 </div>
               </div>
@@ -303,7 +334,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                       value={newMessage} 
                       onChange={(e) => setNewMessage(e.target.value)} 
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()} 
-                      placeholder="ESCREVER RESPOSTA NEURAL..." 
+                      placeholder="ESCREVER RESPOSTA..." 
                       className="flex-1 bg-transparent border-none py-4 px-6 text-sm text-white outline-none focus:ring-0 placeholder:text-slate-800"
                     />
                     <button 
@@ -321,9 +352,9 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                <div className="w-24 h-24 bg-orange-600/10 rounded-full flex items-center justify-center text-orange-500 mb-6">
                   <Globe size={48} className="animate-pulse" />
                </div>
-               <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter mb-4">Aguardando Uplink Neural.</h3>
+               <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter mb-4">Aguardando Uplink.</h3>
                <p className="text-[11px] font-bold uppercase tracking-[0.3em] max-w-sm leading-relaxed">
-                 Selecione um cliente na barra lateral para iniciar a supervisão do atendimento assistido por IA.
+                 Selecione um cliente para iniciar a supervisão. Caso a lista esteja vazia, clique em Sincronizar Leads.
                </p>
             </div>
           )}
