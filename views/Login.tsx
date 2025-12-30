@@ -56,61 +56,95 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-600/10 blur-[120px] rounded-full animate-pulse" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/5 blur-[120px] rounded-full animate-pulse delay-700" />
+    <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden font-outfit">
+      {/* Background Orbs */}
+      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-orange-600/5 blur-[150px] rounded-full animate-pulse" />
+      <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-blue-600/5 blur-[150px] rounded-full animate-pulse delay-700" />
 
-      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500 relative z-10">
-        <div className="bg-[#03081a]/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-700 relative z-10">
+        <div className="bg-[#03081a]/80 backdrop-blur-3xl border border-white/10 rounded-[3.5rem] p-12 shadow-[0_30px_100px_rgba(0,0,0,0.8)]">
           
           <div className="flex flex-col items-center mb-10 text-center">
-             <div onClick={onBack} className="cursor-pointer group flex items-center gap-3 mb-8">
-                <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                   <Zap className="text-white" size={24} />
+             <div onClick={onBack} className="cursor-pointer group flex items-center gap-4 mb-8">
+                <div className="w-14 h-14 bg-orange-600 rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-orange-600/20 group-hover:scale-110 transition-transform duration-500">
+                   <Zap className="text-white" size={32} />
                 </div>
                 <div className="text-left">
-                   <h2 className="text-xl font-black text-white italic tracking-tighter uppercase leading-none">WayFlow iA</h2>
-                   <p className="text-[8px] font-black text-orange-500 uppercase tracking-[0.3em] mt-1">Neural Core v3.1</p>
+                   <h2 className="text-2xl font-black text-white italic tracking-tighter uppercase leading-none">WayFlow iA</h2>
+                   <p className="text-[10px] font-black text-orange-500 uppercase tracking-[0.4em] mt-1">Neural Enterprise</p>
                 </div>
              </div>
-             <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Bem-vindo.</h3>
-             <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Painel de Controle de Automações</p>
+             <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter mb-2 leading-none">Login de Acesso.</h3>
+             <p className="text-slate-600 text-[10px] font-black uppercase tracking-widest">Inicie sua operação neural agora</p>
           </div>
 
           <div className="space-y-4 mb-8">
-             <button onClick={() => handleSocialLogin('google')} className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4">
+             <button 
+               onClick={() => handleSocialLogin('google')} 
+               className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4.5 rounded-[1.5rem] text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group"
+             >
                <GoogleIcon /> Entrar com Google
              </button>
-             <button onClick={() => handleSocialLogin('github')} className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4">
-               <Github size={20} className="text-slate-400" /> Entrar com GitHub
+             <button 
+               onClick={() => handleSocialLogin('github')} 
+               className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4.5 rounded-[1.5rem] text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group"
+             >
+               <Github size={20} className="text-slate-500 group-hover:text-white transition-colors" /> Entrar com GitHub
              </button>
           </div>
 
           <div className="relative flex items-center justify-center mb-8">
              <div className="w-full h-px bg-white/5" />
-             <span className="absolute bg-[#03081a] px-4 text-[9px] font-black text-slate-700 uppercase tracking-widest italic">Ou use e-mail</span>
+             <span className="absolute bg-[#03081a] px-5 text-[9px] font-black text-slate-800 uppercase tracking-widest italic">Ou acesso via credenciais</span>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail</label>
-              <input type="email" required placeholder="seu@email.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800" />
+              <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">E-mail Corporativo</label>
+              <div className="relative group">
+                <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-800 group-focus-within:text-orange-500 transition-colors" size={18} />
+                <input 
+                  type="email" required placeholder="ex: ceo@empresa.com" 
+                  value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} 
+                  className="w-full bg-slate-950 border border-white/10 rounded-[1.2rem] py-4.5 pl-14 pr-5 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-900" 
+                />
+              </div>
             </div>
+            
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Senha</label>
-              <input type="password" required placeholder="••••••••" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800" />
+              <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">Senha Neural</label>
+              <div className="relative group">
+                <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-800 group-focus-within:text-orange-500 transition-colors" size={18} />
+                <input 
+                  type="password" required placeholder="••••••••" 
+                  value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} 
+                  className="w-full bg-slate-950 border border-white/10 rounded-[1.2rem] py-4.5 pl-14 pr-5 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-900" 
+                />
+              </div>
             </div>
-            <button disabled={loading} className="w-full bg-orange-600 hover:bg-orange-500 py-5 rounded-2xl text-white font-black text-xs uppercase tracking-[0.3em] shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
+
+            <button 
+              disabled={loading} 
+              className="w-full bg-orange-600 hover:bg-orange-500 py-5 rounded-[1.5rem] text-white font-black text-xs uppercase tracking-[0.4em] shadow-2xl shadow-orange-600/30 transition-all active:scale-95 flex items-center justify-center gap-3 mt-4"
+            >
               {loading ? <Loader2 className="animate-spin" size={20} /> : <Zap size={18} />}
-              {loading ? 'Validando...' : 'Acessar Sistema'}
+              {loading ? 'AUTENTICANDO...' : 'ENTRAR NO SISTEMA'}
             </button>
           </form>
 
-          <div className="mt-8 pt-8 border-t border-white/5 flex flex-col items-center">
-            <button onClick={onBack} className="text-[10px] font-black text-slate-600 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-2">
+          <div className="mt-10 pt-8 border-t border-white/5 flex flex-col items-center gap-6">
+            <div className="flex items-center gap-2 text-slate-800">
+               <ShieldCheck size={14} />
+               <span className="text-[9px] font-black uppercase tracking-widest">Acesso Seguro SSL-256</span>
+            </div>
+            <button onClick={onBack} className="text-[10px] font-black text-slate-600 hover:text-white uppercase tracking-[0.2em] transition-colors flex items-center gap-2">
               <ArrowLeft size={14} /> Voltar ao Início
             </button>
           </div>
+        </div>
+
+        <div className="mt-8 text-center">
+           <p className="text-[9px] font-black text-slate-900 uppercase tracking-[0.5em] italic">WayFlow System © 2025 • Quantum Infrastructure</p>
         </div>
       </div>
     </div>
