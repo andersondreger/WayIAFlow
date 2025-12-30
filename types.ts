@@ -12,6 +12,8 @@ export enum AppView {
 
 export type LLMModel = 'gemini-3-flash-preview' | 'gemini-3-pro-preview' | 'gemini-2.5-flash-native-audio-preview-09-2025';
 
+export type KanbanColumnId = 'awaiting' | 'processing' | 'pending_payment' | 'completed';
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -27,11 +29,13 @@ export interface KanbanLead {
   name: string;
   phone: string;
   lastMessage: string;
+  lastMessageTimestamp: number;
   value: number;
   avatar: string;
-  columnId: 'new' | 'ai_processing' | 'human_needed' | 'won';
+  columnId: KanbanColumnId;
   status: 'online' | 'offline';
   unreadCount?: number;
+  incidentType?: 'cartao_negado' | 'pix_expirado' | 'boleto_vencido' | 'abandono';
 }
 
 export interface ChatMessage {
