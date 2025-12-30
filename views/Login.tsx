@@ -1,8 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
-  ArrowLeft, Mail, Lock, Loader2, User, 
-  ShieldCheck, Chrome, Github, Zap, Sparkles, Cpu
+  ArrowLeft, Mail, Lock, Loader2, Zap, ShieldCheck, Github
 } from 'lucide-react';
 import { supabase } from '../services/supabase.ts';
 
@@ -11,15 +10,20 @@ interface LoginProps {
   onBack: () => void;
 }
 
+const GoogleIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.66l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+  </svg>
+);
+
 const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
   const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'login' | 'register' | 'forgot'>('login');
-  
   const [formData, setFormData] = useState({
     email: '',
-    password: '',
-    confirmPassword: '',
-    fullName: ''
+    password: ''
   });
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -33,7 +37,24 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
       if (error) throw error;
       if (data.session) onLoginSuccess();
     } catch (error: any) {
-      alert("Erro no Login: " + error.message);
+      alert("Erro na Autenticação: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider: 'google' | 'github') => {
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: window.location.origin
+        }
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      alert(`Erro no login com ${provider}: ` + error.message);
     } finally {
       setLoading(false);
     }
@@ -41,94 +62,88 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
 
   return (
     <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Efeitos de Fundo */}
-      <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-orange-600 blur-[120px] rounded-full animate-pulse" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600 blur-[120px] rounded-full animate-pulse delay-700" />
-      </div>
+      {/* Glow Effects */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-600/10 blur-[120px] rounded-full animate-pulse" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/5 blur-[120px] rounded-full animate-pulse delay-700" />
 
-      <div className="max-w-[1000px] w-full grid grid-cols-1 lg:grid-cols-2 bg-[#03081a]/80 backdrop-blur-2xl border border-white/10 rounded-[3rem] overflow-hidden shadow-[0_30px_100px_rgba(0,0,0,0.8)] relative z-10">
-        
-        {/* Lado Esquerdo - Info Automação */}
-        <div className="hidden lg:flex flex-col p-12 bg-gradient-to-br from-orange-600/20 to-transparent border-r border-white/5">
-          <div className="mb-auto">
-             <div className="flex items-center gap-3 mb-8">
-                <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center shadow-lg"><Zap className="text-white" size={20} /></div>
-                <h2 className="text-xl font-black text-white italic tracking-tighter uppercase">WayFlow iA</h2>
-             </div>
-             <h1 className="text-4xl font-black text-white leading-none tracking-tighter italic mb-6 uppercase">Recuperação de <br /><span className="text-orange-500">Checkout Automática</span>.</h1>
-             <p className="text-slate-400 text-sm leading-relaxed font-medium mb-8">Nossa rede neural identifica abandonos e inicia conversas persuasivas no WhatsApp em milissegundos.</p>
-             
-             <div className="space-y-4">
-                <div className="flex items-center gap-4 p-4 bg-white/5 border border-white/5 rounded-2xl">
-                   <div className="text-orange-500"><Cpu size={20}/></div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">Integração Nativa Evolution API</p>
+      <div className="w-full max-w-md animate-in fade-in zoom-in-95 duration-500 relative z-10">
+        <div className="bg-[#03081a]/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-10 shadow-2xl">
+          
+          <div className="flex flex-col items-center mb-10 text-center">
+             <div onClick={onBack} className="cursor-pointer group flex items-center gap-3 mb-8">
+                <div className="w-12 h-12 bg-orange-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                   <Zap className="text-white" size={24} />
                 </div>
-                <div className="flex items-center gap-4 p-4 bg-white/5 border border-white/5 rounded-2xl">
-                   <div className="text-emerald-500"><Sparkles size={20}/></div>
-                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">IA com Sentimento Humano</p>
+                <div className="text-left">
+                   <h2 className="text-xl font-black text-white italic tracking-tighter uppercase leading-none">WayFlow iA</h2>
+                   <p className="text-[8px] font-black text-orange-500 uppercase tracking-[0.3em] mt-1">Neural Core v3.1</p>
                 </div>
              </div>
+             <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Login Neural.</h3>
+             <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Acesse sua Central de Automações</p>
           </div>
-          <div className="mt-10 pt-10 border-t border-white/5 text-[10px] text-slate-600 font-black uppercase tracking-widest italic">
-             © 2025 WayFlow System • v3.1 Neural Core
+
+          <div className="space-y-4 mb-8">
+             <button 
+               onClick={() => handleSocialLogin('google')}
+               className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group"
+             >
+               <GoogleIcon /> Entrar com Google
+             </button>
+             <button 
+               onClick={() => handleSocialLogin('github')}
+               className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group"
+             >
+               <Github size={20} className="text-slate-400 group-hover:text-white transition-colors" /> Entrar com GitHub
+             </button>
           </div>
-        </div>
 
-        {/* Lado Direito - Form */}
-        <div className="p-12 md:p-16 flex flex-col justify-center">
-           <div className="mb-10 text-center lg:text-left">
-              <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Acesse o Portal.</h3>
-              <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Painel de Automação de Vendas</p>
-           </div>
+          <div className="relative flex items-center justify-center mb-8">
+             <div className="w-full h-px bg-white/5" />
+             <span className="absolute bg-[#03081a] px-4 text-[9px] font-black text-slate-700 uppercase tracking-widest italic">Ou use suas credenciais</span>
+          </div>
 
-           <form onSubmit={handleLogin} className="space-y-6">
-              <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Credencial de Acesso (E-mail)</label>
-                 <div className="relative group">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-orange-500 transition-colors" size={18} />
-                    <input 
-                      type="email" required placeholder="adm@wayflow.ia" 
-                      value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
-                    />
-                 </div>
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail de Acesso</label>
+              <div className="relative group">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-700 group-focus-within:text-orange-500 transition-colors" size={18} />
+                <input 
+                  type="email" required placeholder="seu@email.com" 
+                  value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
+                />
               </div>
+            </div>
 
-              <div className="space-y-2">
-                 <div className="flex justify-between px-1">
-                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Senha Neural</label>
-                   <button type="button" className="text-[10px] font-black text-orange-500 uppercase tracking-widest">Esqueci a Senha</button>
-                 </div>
-                 <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-orange-500 transition-colors" size={18} />
-                    <input 
-                      type="password" required placeholder="••••••••" 
-                      value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
-                    />
-                 </div>
+            <div className="space-y-2">
+              <div className="flex justify-between px-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Senha Neural</label>
               </div>
-
-              <button 
-                disabled={loading}
-                className="w-full bg-orange-600 hover:bg-orange-500 py-5 rounded-2xl text-white font-black text-xs uppercase tracking-[0.3em] shadow-2xl shadow-orange-600/20 transition-all active:scale-95 flex items-center justify-center gap-3"
-              >
-                 {loading ? <Loader2 className="animate-spin" size={20} /> : <Zap size={18} />}
-                 {loading ? 'Autenticando...' : 'Entrar no Sistema'}
-              </button>
-           </form>
-
-           <div className="mt-10 flex flex-col items-center gap-6">
-              <div className="w-full flex items-center gap-4 opacity-20">
-                 <div className="flex-1 h-px bg-white" />
-                 <span className="text-[9px] font-black text-white uppercase tracking-widest">Secure Cloud</span>
-                 <div className="flex-1 h-px bg-white" />
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-700 group-focus-within:text-orange-500 transition-colors" size={18} />
+                <input 
+                  type="password" required placeholder="••••••••" 
+                  value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
+                />
               </div>
-              <button onClick={onBack} className="text-[10px] font-black text-slate-600 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-2">
-                 <ArrowLeft size={14} /> Voltar para o Site
-              </button>
-           </div>
+            </div>
+
+            <button 
+              disabled={loading}
+              className="w-full bg-orange-600 hover:bg-orange-500 py-5 rounded-2xl text-white font-black text-xs uppercase tracking-[0.3em] shadow-xl shadow-orange-600/20 transition-all active:scale-95 flex items-center justify-center gap-3"
+            >
+              {loading ? <Loader2 className="animate-spin" size={20} /> : <Zap size={18} />}
+              {loading ? 'Validando...' : 'Entrar no Sistema'}
+            </button>
+          </form>
+
+          <div className="mt-8 pt-8 border-t border-white/5 flex flex-col items-center gap-6">
+            <button onClick={onBack} className="text-[10px] font-black text-slate-600 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-2">
+              <ArrowLeft size={14} /> Voltar ao Início
+            </button>
+          </div>
         </div>
       </div>
     </div>
