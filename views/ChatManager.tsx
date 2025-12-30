@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  MessageSquare, Users, Loader2, RefreshCw, Send, Paperclip, Phone, MoreHorizontal, UserCircle, Search, AlertTriangle, ShieldCheck, Database, Terminal, Zap, Globe, WifiOff, Scan, Activity, Cpu, Code, Copy, ChevronDown, ChevronUp, Image as ImageIcon
+  MessageSquare, Users, Loader2, RefreshCw, Send, Paperclip, Phone, MoreHorizontal, UserCircle, Search, AlertTriangle, ShieldCheck, Database, Terminal, Zap, Globe, WifiOff, Scan, Activity, Cpu, Code, Copy, ChevronDown, ChevronUp, Image as ImageIcon, Clipboard
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView, KanbanLead, ChatMessage } from '../types.ts';
@@ -16,7 +16,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const [searchTerm, setSearchTerm] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
-  const [lastRawError, setLastRawError] = useState<any>(null);
+  const [lastRawResponse, setLastRawResponse] = useState<any>(null);
   const [showRawError, setShowRawError] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -31,7 +31,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   });
 
   const addLog = (msg: string) => {
-    setDebugLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 15));
+    console.log(`[WayFlow Debug] ${msg}`);
+    setDebugLog(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 30));
+  };
+
+  const copyFullLog = () => {
+    const logText = debugLog.join('\n') + '\n\nRAW_RESPONSE:\n' + JSON.stringify(lastRawResponse, null, 2);
+    navigator.clipboard.writeText(logText);
+    alert("Log copiado! Cole no chat para análise.");
   };
 
   useEffect(() => {
@@ -60,13 +67,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       });
       
       const data = await res.json().catch(() => null);
+      setLastRawResponse(data);
+      
       if (!res.ok) {
-         setLastRawError(data || { error: `Status ${res.status}` });
-         throw new Error(data?.message || `Erro do Servidor (${res.status})`);
+         throw new Error(data?.message || `Erro HTTP ${res.status}`);
       }
       return data;
     } catch (e: any) {
-      addLog(`Falha: ${e.message}`);
+      addLog(`Falha Fetch: ${e.message}`);
       throw e;
     }
   };
@@ -74,123 +82,136 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
   const findDataArray = (obj: any): any[] => {
     if (!obj) return [];
     if (Array.isArray(obj)) return obj;
+    // Padrões de retorno da Evolution API v2
     const paths = [
       obj.records, obj.data, obj.chats, obj.contacts,
       obj.instance?.chats, obj.instance?.contacts,
-      obj.data?.records, obj.data?.chats,
-      obj.messages
+      obj.messages, obj.data?.records
     ];
     for (const path of paths) {
       if (Array.isArray(path)) return path;
     }
+    // Deep search por qualquer array
     for (const key in obj) {
       if (Array.isArray(obj[key])) return obj[key];
     }
     return [];
   };
 
-  // Função para extrair JID considerando participantes de grupos e LIDs
   const extractCorrectJid = (data: any): string => {
     if (!data) return '';
     const key = data.key || data;
     
-    // Se for mensagem de grupo, tentamos pegar o participante real
-    if (key.remoteJid?.includes('@g.us') && key.participantAlt) {
-      return key.participantAlt;
+    // Se for de grupo, precisamos do participantAlt (conforme seu log)
+    if (key.remoteJid?.includes('@g.us')) {
+      return key.participantAlt || key.participant || '';
     }
 
+    // Prioridade para Alt JID (evita o @lid)
     return key.remoteJidAlt || key.remoteJid || data.id || data.jid || '';
   };
 
   const handleSync = useCallback(async () => {
     const baseUrl = getBaseUrl();
     if (!selectedInstanceName || !baseUrl || !config.evoKey) {
-      setErrorMsg("Configurações incompletas.");
+      setErrorMsg("Configurações não encontradas.");
       return;
     }
     
     setIsSyncing(true);
     setErrorMsg(null);
     setLeads([]);
-    addLog(`Iniciando Recuperação Neural: ${selectedInstanceName}`);
+    addLog(`>>> INICIANDO ESCANEAMENTO DA INSTÂNCIA: ${selectedInstanceName}`);
     
     try {
+      // 1. Estado da Conexão
+      addLog("Checando canal Baileys...");
       const stateData = await performFetch(`${baseUrl}/instance/connectionState/${selectedInstanceName}`);
       const state = stateData.instance?.state || stateData.state;
-      addLog(`Status Node: ${state}`);
+      addLog(`Estado: ${state}`);
 
       if (state !== 'open' && state !== 'CONNECTED') {
-        throw new Error(`Instância ${selectedInstanceName} está offline no servidor.`);
+        throw new Error(`A instância '${selectedInstanceName}' está desconectada ou em standby.`);
       }
 
-      addLog("Solicitando limpeza de cache no Postgres...");
+      // 2. Tentar Sincronização Forçada
+      addLog("Solicitando re-sync ao Postgres...");
       await fetch(`${baseUrl}/chat/fetchChats/${selectedInstanceName}`, { method: 'POST', headers: { 'apikey': config.evoKey } }).catch(() => {});
-      
-      addLog("Deep Scan nas mensagens (Logs Recentes)...");
-      const msgData = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
-        method: 'POST',
-        body: JSON.stringify({ where: {}, limit: 200 })
-      });
-      
-      const msgs = findDataArray(msgData);
+      await new Promise(r => setTimeout(r, 3000));
+
       let foundLeadsMap = new Map<string, KanbanLead>();
 
-      // Adiciona chats formais primeiro
-      const chatsData = await performFetch(`${baseUrl}/chat/findMany/${selectedInstanceName}`);
-      const formalChats = findDataArray(chatsData);
-      formalChats.forEach(c => {
-        const jid = extractCorrectJid(c);
-        if (jid && !jid.includes('@g.us')) {
-          const phone = jid.split('@')[0];
-          foundLeadsMap.set(jid, {
-            id: jid,
-            name: c.name || c.pushName || phone,
-            phone: phone,
-            lastMessage: c.lastMessage || "Chat Ativo",
-            value: 0,
-            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name || phone)}&background=f59e0b&color=fff`,
-            columnId: 'ai_processing',
-            status: 'online',
-            unreadCount: c.unreadCount || 0
-          });
-        }
-      });
+      // 3. Estratégia A: chat/findMany
+      addLog("Tentando via 'chat/findMany'...");
+      try {
+        const chatsData = await performFetch(`${baseUrl}/chat/findMany/${selectedInstanceName}`);
+        const chats = findDataArray(chatsData);
+        addLog(`'chat/findMany' retornou ${chats.length} registros.`);
+        chats.forEach(c => {
+          const jid = extractCorrectJid(c);
+          if (jid && !jid.includes('@g.us')) {
+            const phone = jid.split('@')[0];
+            foundLeadsMap.set(jid, {
+              id: jid,
+              name: c.name || c.pushName || phone,
+              phone: phone,
+              lastMessage: c.lastMessage || "Conversa Ativa",
+              value: 0,
+              avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(c.name || phone)}&background=f59e0b&color=fff`,
+              columnId: 'ai_processing',
+              status: 'online',
+              unreadCount: c.unreadCount || 0
+            });
+          }
+        });
+      } catch (e) { addLog("Erro em findMany, pulando..."); }
 
-      // Extrai leads de dentro das mensagens (inclusive grupos)
-      msgs.forEach((m: any) => {
-        const jid = extractCorrectJid(m);
-        if (jid && !jid.includes('@g.us') && !foundLeadsMap.has(jid)) {
-          const phone = jid.split('@')[0];
-          const isMe = m.key?.fromMe;
-          if (isMe) return; // Não adiciona a si mesmo como lead
+      // 4. Estratégia B (Emergency): chat/findMessages
+      // Essencial se o findMany retornar vazio por erro de split da API
+      if (foundLeadsMap.size === 0) {
+        addLog("MODO EMERGÊNCIA: Escaneando logs de mensagens recentes...");
+        const msgData = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
+          method: 'POST',
+          body: JSON.stringify({ where: {}, limit: 150 })
+        });
+        const msgs = findDataArray(msgData);
+        addLog(`Encontradas ${msgs.length} mensagens no log de eventos.`);
 
-          foundLeadsMap.set(jid, {
-            id: jid,
-            name: m.pushName || phone,
-            phone: phone,
-            lastMessage: m.message?.conversation || (m.message?.imageMessage ? "[📷 Imagem]" : "Mensagem de Mídia"),
-            value: 0,
-            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(m.pushName || phone)}&background=f59e0b&color=fff`,
-            columnId: 'ai_processing',
-            status: 'online',
-            unreadCount: 0
-          });
-        }
-      });
+        msgs.forEach((m: any) => {
+          const jid = extractCorrectJid(m);
+          // Ignora mensagens enviadas por mim e grupos
+          if (jid && !jid.includes('@g.us') && !m.key?.fromMe) {
+            const phone = jid.split('@')[0];
+            if (!foundLeadsMap.has(jid)) {
+              foundLeadsMap.set(jid, {
+                id: jid,
+                name: m.pushName || phone,
+                phone: phone,
+                lastMessage: m.message?.conversation || "[Mensagem de Mídia]",
+                value: 0,
+                avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(m.pushName || phone)}&background=f59e0b&color=fff`,
+                columnId: 'ai_processing',
+                status: 'online',
+                unreadCount: 0
+              });
+            }
+          }
+        });
+      }
 
       const finalLeads = Array.from(foundLeadsMap.values());
 
       if (finalLeads.length > 0) {
-        addLog(`Sucesso: ${finalLeads.length} leads identificados.`);
+        addLog(`SUCESSO: ${finalLeads.length} leads recuperados.`);
         setLeads(finalLeads);
         localStorage.setItem('wayflow_leads_cache', JSON.stringify(finalLeads));
       } else {
-        addLog("Nenhum lead individual encontrado nos logs de mensagens.");
-        setErrorMsg("API Conectada, mas sua conta só possui atividade em GRUPOS. O sistema de CRM ignora grupos para focar em clientes individuais. Envie uma mensagem direta para alguém para testar.");
+        addLog("FALHA CRÍTICA: Nenhum lead individual encontrado nas 3 camadas de busca.");
+        setErrorMsg("A API respondeu, mas não retornou conversas individuais. Verifique os logs no console abaixo para detalhes.");
       }
 
     } catch (e: any) {
-      addLog(`ERRO: ${e.message}`);
+      addLog(`ERRO NO PROCESSO: ${e.message}`);
       setErrorMsg(e.message);
     } finally {
       setIsSyncing(false);
@@ -215,7 +236,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
         setSelectedInstanceName(connected[0].instanceName || connected[0].name);
       }
     } catch (e) {
-      addLog("Falha ao listar instâncias.");
+      addLog("Node Evolution inalcançável.");
     }
   }, [config.evoKey, getBaseUrl, selectedInstanceName]);
 
@@ -235,7 +256,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     setMessages([]);
     const baseUrl = getBaseUrl();
     try {
-      addLog(`Abrindo histórico: ${lead.phone}`);
+      addLog(`Lendo mensagens de: ${lead.id}`);
       const data = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
         method: 'POST',
         body: JSON.stringify({ where: { remoteJid: lead.id }, limit: 50 })
@@ -243,9 +264,9 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       const rawMsgs = findDataArray(data);
       const formatted: ChatMessage[] = rawMsgs.map((m: any): ChatMessage => {
         let content = m.message?.conversation || m.message?.extendedTextMessage?.text;
-        if (!content && m.message?.imageMessage) content = "[📷 Imagem Recebida]";
-        if (!content && m.message?.audioMessage) content = "[🎤 Áudio Recebido]";
-        if (!content) content = "Mensagem não suportada pelo painel";
+        if (!content && m.message?.imageMessage) content = "[📷 Imagem]";
+        if (!content && m.message?.audioMessage) content = "[🎤 Áudio]";
+        if (!content) content = "Interação Registrada";
 
         return {
           id: m.key?.id || Math.random().toString(),
@@ -256,7 +277,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
       }).reverse();
       setMessages(formatted);
     } catch (e: any) {
-      addLog(`Erro ao carregar mensagens.`);
+      addLog(`Falha ao carregar histórico.`);
     }
   };
 
@@ -269,14 +290,14 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     try {
       await performFetch(`${baseUrl}/message/sendText/${selectedInstanceName}`, {
         method: 'POST',
-        body: JSON.stringify({ number: selectedLead.id, text: text, delay: 1000 })
+        body: JSON.stringify({ number: selectedLead.id, text: text, delay: 1200 })
       });
       setMessages(prev => [...prev, { 
         id: Math.random().toString(), sender: 'agent', content: text, 
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
       }]);
     } catch (e: any) {
-      alert("Erro no envio.");
+      alert("Erro ao disparar mensagem.");
       setNewMessage(text);
     } finally {
       setIsSending(false);
@@ -291,16 +312,16 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
       <div className="h-full flex flex-col gap-4 animate-in fade-in duration-500 max-h-[calc(100vh-120px)] overflow-hidden">
         
-        {/* Header de Controle */}
+        {/* Painel Superior */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-[#03081a] border border-white/10 p-5 rounded-3xl shadow-2xl shrink-0">
           <div className="flex items-center gap-4">
              <div className="w-12 h-12 bg-orange-600/20 rounded-2xl flex items-center justify-center text-orange-500 border border-orange-500/20 shadow-lg">
                 <Zap size={24} />
              </div>
              <div>
-                <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Painel de Atendimento</h1>
+                <h1 className="text-xl font-black text-white italic uppercase tracking-tighter leading-none">Central Neural</h1>
                 <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mt-1">
-                  Node Ativo: <span className="text-orange-500">{selectedInstanceName || 'OFFLINE'}</span>
+                  Instância: <span className="text-orange-500">{selectedInstanceName || 'OFFLINE'}</span>
                 </p>
              </div>
           </div>
@@ -311,7 +332,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                onChange={(e) => setSelectedInstanceName(e.target.value)}
                className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-[10px] text-white font-black uppercase tracking-[0.2em] outline-none cursor-pointer flex-1 md:min-w-[220px] focus:border-orange-500 transition-all appearance-none"
              >
-               {availableInstances.length === 0 && <option>Nenhuma Instância Online</option>}
+               {availableInstances.length === 0 && <option>Nenhum Node Ativo</option>}
                {availableInstances.map(inst => (
                  <option key={inst.id} value={inst.instanceName || inst.name}>📡 {inst.instanceName || inst.name}</option>
                ))}
@@ -323,45 +344,49 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               className="px-8 py-3 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-3 transition-all shadow-xl shadow-orange-600/20 active:scale-95"
              >
                 {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} 
-                {isSyncing ? 'Buscando Leads...' : 'Sincronizar'}
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
              </button>
           </div>
         </div>
 
-        {/* Console de Diagnóstico Evoluído */}
-        <div className="bg-black/95 border border-white/10 rounded-2xl p-4 flex flex-col gap-1 overflow-hidden shrink-0 shadow-inner">
-            <div className="flex items-center justify-between mb-2">
+        {/* CONSOLE DE DEPURAÇÃO (AQUI QUE VOCÊ VÊ O LOG) */}
+        <div className="bg-black/95 border border-white/10 rounded-2xl p-5 flex flex-col gap-1 overflow-hidden shrink-0 shadow-inner">
+            <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                   <Terminal size={12} className="text-orange-500" />
-                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Console de Depuração WayFlow</span>
+                   <Terminal size={14} className="text-orange-500" />
+                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Diagnóstico de Uplink (v2.3.7)</span>
                 </div>
                 <div className="flex items-center gap-3">
-                   {lastRawError && (
+                   <button 
+                    onClick={copyFullLog}
+                    className="flex items-center gap-2 text-[9px] font-black text-orange-500 uppercase tracking-widest bg-orange-500/10 px-3 py-1.5 rounded-lg border border-orange-500/20 hover:bg-orange-500/20 transition-all"
+                   >
+                     <Clipboard size={12} /> Copiar Trace Completo
+                   </button>
+                   {lastRawResponse && (
                      <button 
                       onClick={() => setShowRawError(!showRawError)}
-                      className="flex items-center gap-2 text-[8px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-2 py-1 rounded border border-red-500/20 hover:bg-red-500/20 transition-all"
+                      className="flex items-center gap-2 text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-500/10 px-3 py-1.5 rounded-lg border border-red-500/20 hover:bg-red-500/20 transition-all"
                      >
-                       <Code size={10} /> {showRawError ? 'Esconder JSON' : 'Ver Payload Bruto'}
+                       <Code size={12} /> {showRawError ? 'Fechar JSON' : 'Ver Última Resposta'}
                      </button>
                    )}
-                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                   <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Uplink Ativo</span>
                 </div>
             </div>
             
-            {showRawError && lastRawError && (
-              <div className="mb-4 p-4 bg-red-950/30 border border-red-500/20 rounded-xl overflow-hidden animate-in slide-in-from-top-2">
-                <pre className="text-[10px] font-mono text-red-200/60 overflow-x-auto max-h-32 custom-scrollbar">
-                  {JSON.stringify(lastRawError, null, 2)}
+            {showRawError && lastRawResponse && (
+              <div className="mb-4 p-4 bg-red-950/20 border border-red-500/20 rounded-xl overflow-hidden animate-in slide-in-from-top-2">
+                <pre className="text-[10px] font-mono text-red-200/60 overflow-x-auto max-h-40 custom-scrollbar">
+                  {JSON.stringify(lastRawResponse, null, 2)}
                 </pre>
               </div>
             )}
 
-            <div className="max-h-24 overflow-y-auto custom-scrollbar">
+            <div className="max-h-32 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed">
               {debugLog.length === 0 ? (
-                 <p className="text-[10px] font-mono text-slate-700 italic">Aguardando gatilho de sincronia...</p>
+                 <p className="text-slate-700 italic">Aguardando gatilho de sincronização para iniciar log...</p>
               ) : debugLog.map((log, i) => (
-                <p key={i} className={`text-[10px] font-mono ${i === 0 ? 'text-orange-400' : 'text-slate-600'} truncate`}>
+                <p key={i} className={`${i === 0 ? 'text-orange-400 font-bold' : 'text-slate-500'}`}>
                   {i === 0 ? '>> ' : ''}{log}
                 </p>
               ))}
@@ -372,21 +397,21 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
           <div className="bg-orange-500/10 border border-orange-500/20 p-5 rounded-3xl flex items-center gap-5 text-orange-500 animate-in slide-in-from-top-2 shadow-lg">
              <AlertTriangle size={28} className="shrink-0" />
              <div className="flex-1">
-                <p className="text-[11px] font-black uppercase tracking-widest leading-tight mb-1">Aviso do Sistema</p>
+                <p className="text-[11px] font-black uppercase tracking-widest leading-tight mb-1">Diagnóstico Necessário</p>
                 <p className="text-[10px] opacity-80 font-medium leading-snug">{errorMsg}</p>
              </div>
-             <button onClick={handleSync} className="px-5 py-2.5 bg-orange-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-orange-500/20 active:scale-95 transition-all">Tentar de Novo</button>
+             <button onClick={handleSync} className="px-5 py-2.5 bg-orange-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-xl shadow-orange-500/20 active:scale-95 transition-all">Forçar Scan Neural</button>
           </div>
         )}
 
         <div className="flex-1 flex gap-4 overflow-hidden">
-          {/* Listagem de Leads */}
+          {/* Sidebar */}
           <div className="w-full md:w-80 flex flex-col gap-3 bg-[#03081a]/50 border border-white/5 rounded-[2.5rem] p-4 overflow-hidden h-full shadow-inner">
             <div className="relative mb-2">
                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600" size={14} />
                <input 
                 type="text" 
-                placeholder="PROCURAR LEAD..."
+                placeholder="PROCURAR NO BANCO..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-[10px] text-white font-black uppercase tracking-widest focus:outline-none focus:border-orange-500 transition-all"
@@ -404,7 +429,7 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                 <div 
                   key={lead.id}
                   onClick={() => loadChat(lead)}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer group flex items-center gap-4 ${selectedLead?.id === lead.id ? 'bg-orange-600/20 border-orange-500/30' : 'bg-white/[0.02] border-white/5 hover:border-white/20'}`}
+                  className={`p-4 rounded-2xl border transition-all cursor-pointer group flex items-center gap-4 ${selectedLead?.id === lead.id ? 'bg-orange-600/20 border-orange-500/30 shadow-lg shadow-orange-500/5' : 'bg-white/[0.02] border-white/5 hover:border-white/20'}`}
                 >
                   <img src={lead.avatar} className="w-10 h-10 rounded-xl border border-white/10 shrink-0" alt="" />
                   <div className="flex-1 min-w-0">
@@ -417,16 +442,20 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
             </div>
           </div>
 
-          {/* Área do Chat */}
+          {/* Área de Chat */}
           {selectedLead ? (
-            <div className="flex-1 flex flex-col bg-[#03081a] border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl">
+            <div className="flex-1 flex flex-col bg-[#03081a] border border-white/10 rounded-[3rem] overflow-hidden shadow-2xl relative z-10">
               <div className="p-5 border-b border-white/5 flex items-center justify-between bg-white/[0.02] backdrop-blur-md">
                 <div className="flex items-center gap-4">
                    <img src={selectedLead.avatar} className="w-12 h-12 rounded-2xl border border-white/10" alt="" />
                    <div>
                       <h3 className="text-sm font-black text-white italic uppercase tracking-tighter leading-none mb-1">{selectedLead.name}</h3>
-                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">+{selectedLead.phone}</p>
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">Canal: {selectedLead.id}</p>
                    </div>
+                </div>
+                <div className="flex gap-3">
+                   <button className="p-3 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-all"><Phone size={18} /></button>
+                   <button className="p-3 bg-white/5 rounded-xl text-slate-500 hover:text-white transition-all"><MoreHorizontal size={18} /></button>
                 </div>
               </div>
 
@@ -434,15 +463,15 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
                  {messages.length === 0 ? (
                    <div className="h-full flex flex-col items-center justify-center opacity-10">
                       <Activity size={40} className="animate-pulse mb-4" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.3em]">Carregando histórico...</p>
+                      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-center italic">Escaneando Pacotes...</p>
                    </div>
                  ) : messages.map(msg => (
-                   <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'}`}>
+                   <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
                       <div className="max-w-[80%]">
                          <div className={`p-4 rounded-3xl text-[13px] font-medium leading-relaxed shadow-xl ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none'}`}>
                             {msg.content}
                          </div>
-                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp}</p>
+                         <p className={`text-[8px] font-black text-slate-700 uppercase mt-2 px-1 ${msg.sender === 'agent' ? 'text-right' : 'text-left'}`}>{msg.timestamp} • {msg.sender === 'agent' ? 'SISTEMA' : 'CLIENTE'}</p>
                       </div>
                    </div>
                  ))}
@@ -450,17 +479,18 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
 
               <div className="p-6 bg-white/[0.01] border-t border-white/5">
                  <div className="flex items-center gap-4">
+                    <button className="p-4 bg-white/5 rounded-2xl text-slate-500 hover:text-white transition-all"><Paperclip size={20} /></button>
                     <input 
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                      placeholder="ESCREVER MENSAGEM..."
-                      className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-7 text-sm text-white outline-none focus:border-orange-500 transition-all font-medium"
+                      placeholder="INJETAR TEXTO NO CANAL..."
+                      className="flex-1 bg-slate-950 border border-white/10 rounded-2xl py-5 px-7 text-sm text-white outline-none focus:border-orange-500 transition-all placeholder:text-slate-800 font-medium shadow-inner"
                     />
                     <button 
                       onClick={sendMessage} 
                       disabled={!newMessage.trim() || isSending} 
-                      className="p-5 bg-orange-600 text-white rounded-2xl shadow-2xl hover:bg-orange-500 transition-all active:scale-95 shadow-orange-600/30"
+                      className="p-5 bg-orange-600 text-white rounded-2xl shadow-2xl hover:bg-orange-500 disabled:opacity-50 transition-all active:scale-95 shadow-orange-600/30"
                     >
                        {isSending ? <Loader2 size={24} className="animate-spin" /> : <Send size={24} />}
                     </button>
@@ -468,10 +498,10 @@ const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => 
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-[4rem] opacity-30 text-center p-20">
+            <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-[4rem] opacity-30 text-center p-20 bg-white/[0.01]">
                <Globe size={48} className="text-orange-500 animate-pulse mb-4" />
                <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-4">Uplink Offline.</h3>
-               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm">Selecione um contato. Se o banco estiver vazio, certifique-se de que a instância possui atividade recente fora de grupos.</p>
+               <p className="text-[11px] font-bold uppercase tracking-[0.2em] max-w-sm">Selecione um contato. Se a lista estiver vazia, verifique o console de diagnóstico acima.</p>
             </div>
           )}
         </div>
