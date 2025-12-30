@@ -21,10 +21,7 @@ const GoogleIcon = () => (
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
-  });
+  const [formData, setFormData] = useState({ email: '', password: '' });
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,9 +45,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: {
-          redirectTo: window.location.origin
-        }
+        options: { redirectTo: window.location.origin }
       });
       if (error) throw error;
     } catch (error: any) {
@@ -62,7 +57,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
 
   return (
     <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
-      {/* Glow Effects */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-600/10 blur-[120px] rounded-full animate-pulse" />
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/5 blur-[120px] rounded-full animate-pulse delay-700" />
 
@@ -79,67 +73,40 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBack }) => {
                    <p className="text-[8px] font-black text-orange-500 uppercase tracking-[0.3em] mt-1">Neural Core v3.1</p>
                 </div>
              </div>
-             <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Login Neural.</h3>
-             <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Acesse sua Central de Automações</p>
+             <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter mb-2">Bem-vindo.</h3>
+             <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Painel de Controle de Automações</p>
           </div>
 
           <div className="space-y-4 mb-8">
-             <button 
-               onClick={() => handleSocialLogin('google')}
-               className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group"
-             >
+             <button onClick={() => handleSocialLogin('google')} className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4">
                <GoogleIcon /> Entrar com Google
              </button>
-             <button 
-               onClick={() => handleSocialLogin('github')}
-               className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group"
-             >
-               <Github size={20} className="text-slate-400 group-hover:text-white transition-colors" /> Entrar com GitHub
+             <button onClick={() => handleSocialLogin('github')} className="w-full bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 py-4 rounded-2xl text-white font-black text-[10px] uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4">
+               <Github size={20} className="text-slate-400" /> Entrar com GitHub
              </button>
           </div>
 
           <div className="relative flex items-center justify-center mb-8">
              <div className="w-full h-px bg-white/5" />
-             <span className="absolute bg-[#03081a] px-4 text-[9px] font-black text-slate-700 uppercase tracking-widest italic">Ou use suas credenciais</span>
+             <span className="absolute bg-[#03081a] px-4 text-[9px] font-black text-slate-700 uppercase tracking-widest italic">Ou use e-mail</span>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail de Acesso</label>
-              <div className="relative group">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-700 group-focus-within:text-orange-500 transition-colors" size={18} />
-                <input 
-                  type="email" required placeholder="seu@email.com" 
-                  value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
-                />
-              </div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail</label>
+              <input type="email" required placeholder="seu@email.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800" />
             </div>
-
             <div className="space-y-2">
-              <div className="flex justify-between px-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Senha Neural</label>
-              </div>
-              <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-700 group-focus-within:text-orange-500 transition-colors" size={18} />
-                <input 
-                  type="password" required placeholder="••••••••" 
-                  value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})}
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800"
-                />
-              </div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Senha</label>
+              <input type="password" required placeholder="••••••••" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-5 text-white text-sm focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800" />
             </div>
-
-            <button 
-              disabled={loading}
-              className="w-full bg-orange-600 hover:bg-orange-500 py-5 rounded-2xl text-white font-black text-xs uppercase tracking-[0.3em] shadow-xl shadow-orange-600/20 transition-all active:scale-95 flex items-center justify-center gap-3"
-            >
+            <button disabled={loading} className="w-full bg-orange-600 hover:bg-orange-500 py-5 rounded-2xl text-white font-black text-xs uppercase tracking-[0.3em] shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3">
               {loading ? <Loader2 className="animate-spin" size={20} /> : <Zap size={18} />}
-              {loading ? 'Validando...' : 'Entrar no Sistema'}
+              {loading ? 'Validando...' : 'Acessar Sistema'}
             </button>
           </form>
 
-          <div className="mt-8 pt-8 border-t border-white/5 flex flex-col items-center gap-6">
+          <div className="mt-8 pt-8 border-t border-white/5 flex flex-col items-center">
             <button onClick={onBack} className="text-[10px] font-black text-slate-600 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-2">
               <ArrowLeft size={14} /> Voltar ao Início
             </button>
