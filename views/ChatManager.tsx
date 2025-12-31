@@ -1,539 +1,361 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
-  MessageSquare, Users, Loader2, RefreshCw, Send, Search, AlertTriangle, Zap, 
-  ShieldCheck, LayoutGrid, X, Clock, DollarSign, CheckCircle, CheckCircle2, ArrowRight, Sparkles, 
-  Paperclip, Mic, Image as ImageIcon, FileText, MoreVertical, Hash, UserCircle, 
-  Check, CheckCheck, Play, Pause, ChevronLeft, Filter, UserCheck, Phone, Video,
-  PaperclipIcon, Smile, SendHorizonal, StickyNote
+  MessageSquare, Loader2, RefreshCw, Send, Search, Zap, 
+  LayoutGrid, Clock, CheckCircle, CheckCircle2, 
+  Paperclip, Mic, MoreVertical, Hash, Phone, Video, 
+  CheckCheck, StickyNote, Columns, List, Tag, CreditCard, 
+  Plus, History, ArrowUpRight, Target, AlertCircle, 
+  Smartphone, SendHorizonal, UserCircle2
 } from 'lucide-react';
 import Layout from '../components/Layout.tsx';
 import { AppView, KanbanLead, ChatMessage, KanbanColumnId, AgentProfile } from '../types.ts';
-import { GoogleGenAI } from "@google/genai";
 
 const AGENTS: AgentProfile[] = [
-  { id: '1', name: 'Suporte Neural (Bot)', role: 'Agente IA', avatar: 'https://ui-avatars.com/api/?name=IA&background=f59e0b&color=fff', status: 'online' },
-  { id: '2', name: 'Ricardo Santos', role: 'Gerente de Contas', avatar: 'https://i.pravatar.cc/150?u=ricardo', status: 'online' },
-  { id: '3', name: 'Carla Lima', role: 'Especialista de Checkout', avatar: 'https://i.pravatar.cc/150?u=carla', status: 'busy' },
+  { id: '1', name: 'Suporte Neural (IA)', role: 'Especialista em Recuperação', avatar: 'https://ui-avatars.com/api/?name=IA&background=f59e0b&color=fff', status: 'online' },
+  { id: '2', name: 'Gestor WayFlow', role: 'Administrador', avatar: 'https://ui-avatars.com/api/?name=Admin&background=020617&color=fff', status: 'online' },
 ];
 
 const ChatManager: React.FC<{ onLogout: () => void, onNavigate: (v: AppView) => void }> = ({ onLogout, onNavigate }) => {
-  const [selectedLead, setSelectedLead] = useState<KanbanLead | null>(null);
   const [leads, setLeads] = useState<KanbanLead[]>([]);
+  const [selectedLead, setSelectedLead] = useState<KanbanLead | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [filter, setFilter] = useState<KanbanColumnId | 'all'>('all');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingMessages, setIsSyncingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [activeAgent, setActiveAgent] = useState<AgentProfile>(AGENTS[0]);
+  const [activeFilter, setActiveFilter] = useState<KanbanColumnId | 'all'>('all');
+  
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const config = JSON.parse(localStorage.getItem('wayflow_evo_config') || '{"evoUrl":"", "evoKey":""}');
+  const activeInstanceName = localStorage.getItem('wayflow_last_instance') || '';
 
-  const [config] = useState(() => {
-    const saved = localStorage.getItem('wayflow_evo_config');
-    return saved ? JSON.parse(saved) : { evoUrl: '', evoKey: '' };
-  });
-
-  const [selectedInstanceName] = useState(() => localStorage.getItem('wayflow_last_instance') || '');
-
-  const getCleanUrl = useCallback(() => {
-    if (!config.evoUrl) return '';
-    let url = config.evoUrl.trim();
-    if (!url.startsWith('http')) url = 'https://' + url;
-    return url.replace(/\/+$/, "");
-  }, [config.evoUrl]);
-
-  const performFetch = async (endpoint: string, options: RequestInit = {}) => {
-    try {
-      const res = await fetch(endpoint, {
-        ...options,
-        headers: { 
-          'apikey': config.evoKey.trim(), 
-          'Content-Type': 'application/json', 
-          ...(options.headers || {}) 
-        },
-        mode: 'cors'
-      });
-      return await res.json();
-    } catch (e) { 
-      console.error("Fetch Error:", e);
-      return null; 
-    }
-  };
-
-  const handleSync = useCallback(async () => {
+  // 1. SINCRONIZAÇÃO DE CONTATOS (ESTÁVEL)
+  const syncLeads = useCallback(async () => {
+    if (!config.evoUrl || !activeInstanceName) return;
     setIsSyncing(true);
-    const baseUrl = getCleanUrl();
-    
-    // Se não houver configuração, carregamos dados mockados de alta qualidade para não travar a UI
-    if (!selectedInstanceName || !baseUrl || !config.evoKey) {
-      const mockLeads: KanbanLead[] = [
-        { id: '5511999999999@s.whatsapp.net', name: 'Marcos Oliveira', phone: '5511999999999', lastMessage: 'Consegue melhorar o valor?', lastMessageTimestamp: Date.now()/1000 - 45, value: 497, avatar: 'https://i.pravatar.cc/150?u=1', columnId: 'awaiting', status: 'online', unreadCount: 3, incidentType: 'cartao_negado', protocol: 'WF-2025-X01', notes: [] },
-        { id: '5521888888888@s.whatsapp.net', name: 'Ana Beatriz', phone: '5521888888888', lastMessage: 'Já fiz o pagamento via Pix', lastMessageTimestamp: Date.now()/1000 - 1200, value: 297, avatar: 'https://i.pravatar.cc/150?u=2', columnId: 'processing', status: 'online', unreadCount: 0, incidentType: 'pix_expirado', protocol: 'WF-2025-X02', notes: [] },
-        { id: '5531777777777@s.whatsapp.net', name: 'Carlos Log', phone: '5531777777777', lastMessage: 'O boleto não chegou no e-mail', lastMessageTimestamp: Date.now()/1000 - 3600, value: 890, avatar: 'https://i.pravatar.cc/150?u=3', columnId: 'awaiting', status: 'offline', unreadCount: 1, incidentType: 'boleto_vencido', protocol: 'WF-2025-X03', notes: [] },
-      ];
-      setLeads(mockLeads);
-      setIsSyncing(false);
-      return;
-    }
 
     try {
-      // Busca chats/mensagens reais da Evolution API
-      const data = await performFetch(`${baseUrl}/chat/findMessages/${selectedInstanceName}`, {
-        method: 'POST',
-        body: JSON.stringify({ where: {}, limit: 50 })
+      const baseUrl = config.evoUrl.replace(/\/$/, '');
+      const response = await fetch(`${baseUrl}/chat/findMany/${activeInstanceName}`, {
+        headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' }
       });
+
+      if (!response.ok) throw new Error("Falha na resposta da API");
+      const data = await response.json();
       
-      if (data && data.records) {
-        const records = data.records;
-        const leadsMap = new Map();
-        records.forEach((m: any) => {
-          const jid = m.key?.remoteJid;
-          if (jid && !jid.includes('@g.us')) {
-            if (!leadsMap.has(jid)) {
-              leadsMap.set(jid, {
-                id: jid,
-                name: m.pushName || jid.split('@')[0],
-                phone: jid.split('@')[0],
-                lastMessage: m.message?.conversation || m.message?.extendedTextMessage?.text || "Mídia recebida",
-                lastMessageTimestamp: m.messageTimestamp,
-                value: 0,
-                avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(m.pushName || 'C')}&background=random&color=fff`,
-                columnId: 'awaiting',
-                status: 'online',
-                unreadCount: 0,
-                protocol: `WF-2025-${Math.floor(1000 + Math.random() * 9000)}`,
-                notes: []
-              });
-            }
-          }
-        });
-        setLeads(Array.from(leadsMap.values()));
+      // A Evolution API v2 pode retornar os chats diretamente ou dentro de .data
+      const rawChats = Array.isArray(data) ? data : (data.data || []);
+
+      const mapped = rawChats
+        .filter((c: any) => c.id && !c.id.includes('@g.us')) // Filtra apenas contatos privados
+        .map((c: any) => ({
+          id: c.id,
+          name: c.pushName || c.name || c.id.split('@')[0],
+          phone: c.id.split('@')[0],
+          lastMessage: c.lastMessage || 'Sem mensagens recentes',
+          lastMessageTimestamp: c.messageTimestamp || Date.now() / 1000,
+          value: Math.floor(Math.random() * 500) + 150,
+          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(c.pushName || 'U')}&background=random`,
+          columnId: 'awaiting',
+          status: 'online',
+          unreadCount: c.unreadCount || 0,
+          incidentType: 'cartao_negado',
+          protocol: `WF-${Math.floor(1000 + Math.random() * 9000)}`,
+          notes: []
+        }));
+
+      setLeads(mapped);
+    } catch (err) {
+      console.error("Erro na sincronização:", err);
+      // Fallback para não deixar a tela vazia em ambiente de teste
+      if (leads.length === 0) {
+        setLeads([{ 
+          id: 'demo', name: 'Lead de Teste (API Offline)', phone: '00000000', 
+          lastMessage: 'Aguardando conexão real...', lastMessageTimestamp: Date.now()/1000, 
+          value: 0, avatar: 'https://i.pravatar.cc/150?u=demo', columnId: 'awaiting', 
+          status: 'offline', unreadCount: 0, incidentType: 'cartao_negado', protocol: 'DEMO', notes: [] 
+        }]);
       }
-    } catch (e) {
-      console.error("Sync failed:", e);
     } finally {
       setIsSyncing(false);
     }
-  }, [selectedInstanceName, getCleanUrl, config.evoKey]);
+  }, [config.evoUrl, config.evoKey, activeInstanceName]);
 
-  useEffect(() => { handleSync(); }, [handleSync]);
+  // 2. BUSCA DE MENSAGENS DO LEAD
+  const fetchMessages = useCallback(async (leadId: string) => {
+    if (!config.evoUrl || !activeInstanceName) return;
+    setIsSyncingMessages(true);
+
+    try {
+      const baseUrl = config.evoUrl.replace(/\/$/, '');
+      const response = await fetch(`${baseUrl}/chat/findMessages/${activeInstanceName}?number=${leadId.split('@')[0]}&count=15`, {
+        headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawMsgs = Array.isArray(data) ? data : (data.messages || data.data || []);
+        
+        const mapped = rawMsgs.map((m: any) => ({
+          id: m.key?.id || Math.random().toString(),
+          sender: m.key?.fromMe ? 'agent' : 'user',
+          content: m.message?.conversation || m.message?.extendedTextMessage?.text || 'Mídia/Outro',
+          timestamp: new Date(m.messageTimestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: 'text'
+        })).reverse();
+
+        setMessages(mapped);
+      }
+    } catch (e) {
+      console.error("Erro ao buscar mensagens:", e);
+    } finally {
+      setIsSyncingMessages(false);
+    }
+  }, [config.evoUrl, config.evoKey, activeInstanceName]);
+
+  useEffect(() => { syncLeads(); }, [syncLeads]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: 'smooth'
-      });
-    }
-  }, [messages, isTyping]);
+    if (selectedLead) fetchMessages(selectedLead.id);
+  }, [selectedLead, fetchMessages]);
 
-  const sendMessage = async (type: 'text' | 'image' | 'audio' = 'text', mediaData?: string) => {
-    if ((!newMessage.trim() && type === 'text') || !selectedLead) return;
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedLead || !config.evoUrl) return;
     setIsSending(true);
-    
-    // UI Optimism: Adiciona mensagem na tela imediatamente
-    const tempMsg: ChatMessage = {
-      id: Math.random().toString(),
-      sender: 'agent',
-      content: newMessage,
-      type,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    
-    setMessages(prev => [...prev, tempMsg]);
-    const currentText = newMessage;
+
+    const text = newMessage;
     setNewMessage('');
 
-    const baseUrl = getCleanUrl();
-    if (baseUrl && selectedInstanceName) {
-      const endpoint = type === 'text' ? 'sendText' : 'sendMedia';
-      const payload = type === 'text' 
-        ? { number: selectedLead.id, text: currentText, linkPreview: true }
-        : { number: selectedLead.id, media: mediaData, mediaType: type };
-
-      await performFetch(`${baseUrl}/message/${endpoint}/${selectedInstanceName}`, {
+    try {
+      const baseUrl = config.evoUrl.replace(/\/$/, '');
+      const response = await fetch(`${baseUrl}/message/sendText/${activeInstanceName}`, {
         method: 'POST',
-        body: JSON.stringify(payload)
+        headers: { 'apikey': config.evoKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: selectedLead.id, text, delay: 500 })
       });
+
+      if (response.ok) {
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(), sender: 'agent', content: text, 
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), type: 'text'
+        }]);
+      }
+    } catch (e) {
+      alert("Erro ao enviar. Verifique sua conexão.");
+    } finally {
+      setIsSending(false);
     }
-    
-    setIsSending(false);
   };
 
-  const openChat = (lead: KanbanLead) => {
-    setSelectedLead(lead);
-    // Simular carregamento de mensagens do chat selecionado
-    setMessages([
-      { id: '1', sender: 'user', content: lead.lastMessage, type: 'text', timestamp: '14:20' },
-      { id: '2', sender: 'system', content: `Protocolo Gerado: ${lead.protocol}`, type: 'text', timestamp: '14:21' }
-    ]);
-    
-    // Marcar como lida na Evolution
-    const baseUrl = getCleanUrl();
-    if (baseUrl && selectedInstanceName) {
-      performFetch(`${baseUrl}/chat/markRead/${selectedInstanceName}`, {
-        method: 'POST',
-        body: JSON.stringify({ number: lead.id, read: true })
-      });
-    }
-
-    // Reset unread count localmente
-    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, unreadCount: 0 } : l));
-  };
-
-  const filteredLeads = leads.filter(l => filter === 'all' || l.columnId === filter);
+  const filteredLeads = leads.filter(l => activeFilter === 'all' || l.columnId === activeFilter);
 
   return (
     <Layout activeView={AppView.CHAT_MANAGER} onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="h-full flex bg-[#020617] rounded-[2.5rem] border border-white/5 overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.5)]">
+      <div className="h-full flex flex-col bg-[#010413] rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl">
         
-        {/* COL 1: AGENTES & NAVEGAÇÃO INTERNA */}
-        <div className="w-20 lg:w-64 border-r border-white/5 flex flex-col bg-[#03081a] shrink-0">
-           <div className="p-6 border-b border-white/5 flex flex-col gap-6">
-              <div className="hidden lg:flex items-center justify-between">
-                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Agentes Online</h3>
-                <span className="w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_8px_#10b981]" />
+        {/* TOP HEADER */}
+        <header className="h-20 px-8 border-b border-white/5 flex items-center justify-between bg-black/20 shrink-0">
+          <div className="flex items-center gap-6">
+             <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center shadow-lg"><Zap size={20} className="text-white" /></div>
+                <h2 className="text-xl font-black text-white italic tracking-tighter uppercase">WayFlow Desk</h2>
+             </div>
+             <div className="h-8 w-px bg-white/5" />
+             <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center gap-2">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">{activeInstanceName || 'Nenhuma Instância Ativa'}</span>
+             </div>
+          </div>
+          <button onClick={syncLeads} disabled={isSyncing} className="p-3 bg-white/5 text-slate-400 hover:text-white rounded-xl transition-all border border-white/5">
+             <RefreshCw size={18} className={isSyncing ? 'animate-spin text-orange-500' : ''} />
+          </button>
+        </header>
+
+        <div className="flex-1 flex overflow-hidden">
+           
+           {/* COL 1: FILTROS */}
+           <div className="w-64 border-r border-white/5 bg-[#020617] shrink-0 p-6 space-y-8 overflow-y-auto custom-scrollbar">
+              <section className="space-y-4">
+                 <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Atendente</h3>
+                 {AGENTS.map(a => (
+                   <div key={a.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white/[0.02] border border-white/5">
+                      <img src={a.avatar} className="w-8 h-8 rounded-lg" />
+                      <div className="min-w-0">
+                         <p className="text-xs font-black text-white truncate">{a.name}</p>
+                         <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest">Disponível</p>
+                      </div>
+                   </div>
+                 ))}
+              </section>
+              <section className="space-y-2">
+                 <h3 className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-4">Pipeline</h3>
+                 <FilterItem active={activeFilter === 'all'} onClick={() => setActiveFilter('all')} icon={LayoutGrid} label="Todos" />
+                 <FilterItem active={activeFilter === 'awaiting'} onClick={() => setActiveFilter('awaiting')} icon={Clock} label="Aguardando" color="text-rose-500" />
+                 <FilterItem active={activeFilter === 'processing'} onClick={() => setActiveFilter('processing')} icon={Zap} label="Em Aberto" color="text-amber-500" />
+                 <FilterItem active={activeFilter === 'completed'} onClick={() => setActiveFilter('completed')} icon={CheckCircle} label="Finalizados" color="text-emerald-500" />
+              </section>
+           </div>
+
+           {/* COL 2: LISTA DE CHATS */}
+           <div className="w-80 border-r border-white/5 bg-[#010413] shrink-0 flex flex-col">
+              <div className="p-5 border-b border-white/5">
+                 <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-800" size={14} />
+                    <input placeholder="Buscar lead..." className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-white outline-none focus:border-orange-500" />
+                 </div>
               </div>
-              <div className="space-y-3">
-                 {AGENTS.map(agent => (
-                   <button 
-                    key={agent.id}
-                    onClick={() => setActiveAgent(agent)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all ${activeAgent.id === agent.id ? 'bg-orange-600/10 border border-orange-500/20 shadow-lg' : 'hover:bg-white/5 border border-transparent'}`}
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
+                 {filteredLeads.map(lead => (
+                   <div 
+                    key={lead.id} 
+                    onClick={() => setSelectedLead(lead)}
+                    className={`p-5 border-b border-white/5 cursor-pointer transition-all hover:bg-white/[0.03] relative ${selectedLead?.id === lead.id ? 'bg-orange-600/5' : ''}`}
                    >
-                      <div className="relative shrink-0">
-                         <img src={agent.avatar} className="w-10 h-10 rounded-xl" />
-                         <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-[#03081a] ${agent.status === 'online' ? 'bg-emerald-500' : 'bg-yellow-500'}`} />
+                      {selectedLead?.id === lead.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-orange-600 shadow-[0_0_15px_#ea580c]" />}
+                      <div className="flex items-center gap-4">
+                         <div className="relative">
+                            <img src={lead.avatar} className="w-11 h-11 rounded-xl border border-white/10" />
+                            {lead.unreadCount > 0 && <span className="absolute -top-1 -right-1 bg-orange-600 text-white text-[8px] font-black w-5 h-5 flex items-center justify-center rounded-full border border-white/10">{lead.unreadCount}</span>}
+                         </div>
+                         <div className="min-w-0 flex-1">
+                            <h4 className="text-[13px] font-black text-white truncate uppercase italic">{lead.name}</h4>
+                            <p className="text-[11px] text-slate-600 truncate italic">"{lead.lastMessage}"</p>
+                         </div>
                       </div>
-                      <div className="hidden lg:block text-left overflow-hidden">
-                         <p className={`text-xs font-black truncate tracking-tight ${activeAgent.id === agent.id ? 'text-white' : 'text-slate-400'}`}>{agent.name}</p>
-                         <p className="text-[8px] text-slate-600 uppercase font-black tracking-widest">{agent.role}</p>
-                      </div>
-                   </button>
+                   </div>
                  ))}
               </div>
            </div>
-           
-           <div className="flex-1 p-6 flex flex-col">
-              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-6 hidden lg:block">Status Atendimento</h3>
-              <div className="space-y-2">
-                 <FilterBtn active={filter === 'all'} onClick={() => setFilter('all')} label="Fluxo Geral" icon={LayoutGrid} />
-                 <FilterBtn active={filter === 'awaiting'} onClick={() => setFilter('awaiting')} label="Aguardando" icon={Clock} color="text-red-500" />
-                 <FilterBtn active={filter === 'processing'} onClick={() => setFilter('processing')} label="Em Aberto" icon={Zap} color="text-orange-500" />
-                 <FilterBtn active={filter === 'completed'} onClick={() => setFilter('completed')} label="Concluídos" icon={CheckCircle} color="text-emerald-500" />
-              </div>
-              <div className="mt-auto pt-6">
-                <button className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-white/5 text-slate-500 transition-all border border-transparent">
-                  <UserCircle size={18} />
-                  <span className="hidden lg:block text-[10px] font-black uppercase tracking-widest">Meus Dados</span>
-                </button>
-              </div>
-           </div>
-        </div>
 
-        {/* COL 2: LISTA DE LEADS (CHATS) */}
-        <div className="w-80 lg:w-96 border-r border-white/5 flex flex-col bg-[#020617] shrink-0">
-           <div className="p-6 border-b border-white/5 space-y-4 bg-white/[0.01]">
-              <div className="flex items-center justify-between mb-2">
-                 <h2 className="text-sm font-black text-white uppercase tracking-widest italic">Leads Evolution</h2>
-                 <button onClick={handleSync} disabled={isSyncing} className="p-2 text-slate-600 hover:text-white transition-all">
-                    {isSyncing ? <Loader2 size={16} className="animate-spin text-orange-500" /> : <RefreshCw size={16} />}
-                 </button>
-              </div>
-              <div className="relative group">
-                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-700 group-focus-within:text-orange-500 transition-colors" size={16} />
-                 <input placeholder="Buscar contato ou protocolo..." className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-12 pr-4 text-xs text-white focus:outline-none focus:border-orange-500 transition-all placeholder:text-slate-800" />
-              </div>
-           </div>
-           
-           <div className="flex-1 overflow-y-auto custom-scrollbar bg-black/20">
-              {filteredLeads.map(lead => (
-                <div 
-                  key={lead.id}
-                  onClick={() => openChat(lead)}
-                  className={`p-5 border-b border-white/5 cursor-pointer transition-all hover:bg-white/[0.03] relative group ${selectedLead?.id === lead.id ? 'bg-orange-600/5' : ''}`}
-                >
-                   {selectedLead?.id === lead.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-orange-600" />}
-                   <div className="flex items-center gap-4">
-                      <div className="relative shrink-0">
-                         <img src={lead.avatar} className="w-12 h-12 rounded-2xl border border-white/10 group-hover:scale-105 transition-transform" />
-                         {lead.status === 'online' && <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#020617]" />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                         <div className="flex justify-between items-center mb-1">
-                            <h4 className="text-[13px] font-black text-white italic truncate tracking-tight">{lead.name}</h4>
-                            <span className="text-[9px] font-black text-slate-700 uppercase">{new Date(lead.lastMessageTimestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                         </div>
-                         <div className="flex justify-between items-center">
-                            <p className="text-[11px] text-slate-500 truncate font-medium italic">"{lead.lastMessage}"</p>
-                            {lead.unreadCount > 0 && <span className="bg-orange-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-lg shadow-orange-600/30">{lead.unreadCount}</span>}
+           {/* COL 3: ÁREA DE MENSAGENS */}
+           <div className="flex-1 flex flex-col bg-[#01020a] min-w-0 border-r border-white/5 overflow-hidden">
+              {selectedLead ? (
+                <>
+                   <header className="h-20 px-8 border-b border-white/5 flex items-center justify-between bg-black/20 shrink-0">
+                      <div className="flex items-center gap-4">
+                         <img src={selectedLead.avatar} className="w-12 h-12 rounded-xl border border-white/10" />
+                         <div>
+                            <h3 className="text-lg font-black text-white italic uppercase tracking-tighter leading-none">{selectedLead.name}</h3>
+                            <p className="text-[9px] font-black text-slate-700 uppercase tracking-widest mt-1.5">{selectedLead.protocol}</p>
                          </div>
                       </div>
+                      <div className="flex items-center gap-2">
+                         <button className="p-3 bg-white/5 text-slate-600 hover:text-white rounded-xl border border-white/5"><Phone size={18} /></button>
+                         <button className="p-3 bg-white/5 text-slate-600 hover:text-white rounded-xl border border-white/5"><MoreVertical size={18} /></button>
+                      </div>
+                   </header>
+
+                   <div ref={scrollRef} className="flex-1 p-10 overflow-y-auto space-y-8 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] custom-scrollbar">
+                      {isSyncingMessages ? (
+                        <div className="h-full flex flex-col items-center justify-center opacity-30 gap-4">
+                           <Loader2 size={32} className="animate-spin text-orange-500" />
+                           <p className="text-[10px] font-black uppercase tracking-widest">Sincronizando Histórico...</p>
+                        </div>
+                      ) : (
+                        messages.map((msg, i) => (
+                          <div key={i} className={`flex w-full ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'}`}>
+                             <div className={`max-w-[75%] p-5 rounded-[2rem] text-[14px] leading-relaxed shadow-2xl ${msg.sender === 'agent' ? 'bg-orange-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-100 rounded-tl-none border border-white/5'}`}>
+                                {msg.content}
+                                <div className="flex items-center gap-2 mt-2 opacity-50 justify-end">
+                                   <span className="text-[8px] font-black uppercase">{msg.timestamp}</span>
+                                   {msg.sender === 'agent' && <CheckCheck size={10} />}
+                                </div>
+                             </div>
+                          </div>
+                        ))
+                      )}
                    </div>
-                </div>
-              ))}
-              {filteredLeads.length === 0 && (
-                <div className="p-20 text-center space-y-4">
-                   <div className="w-16 h-16 bg-white/5 rounded-[2rem] mx-auto flex items-center justify-center text-slate-800"><MessageSquare size={32} /></div>
-                   <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Nenhum lead encontrado</p>
+
+                   <footer className="p-6 border-t border-white/5 bg-black/40">
+                      <div className="flex items-end gap-4 bg-white/[0.02] p-3 rounded-[2.5rem] border border-white/10">
+                         <button className="p-4 text-slate-700 hover:text-orange-500"><Paperclip size={24} /></button>
+                         <textarea 
+                           rows={1}
+                           value={newMessage}
+                           onChange={(e) => setNewMessage(e.target.value)}
+                           onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSendMessage())}
+                           placeholder="Sua resposta neural..." 
+                           className="flex-1 bg-transparent border-none py-4 px-2 text-white text-[15px] outline-none resize-none max-h-32 custom-scrollbar" 
+                         />
+                         <button 
+                           onClick={handleSendMessage}
+                           disabled={!newMessage.trim() || isSending}
+                           className={`p-5 rounded-full shadow-2xl transition-all ${newMessage.trim() ? 'bg-orange-600 text-white shadow-orange-600/30' : 'bg-white/5 text-slate-800'}`}
+                         >
+                            {isSending ? <Loader2 className="animate-spin" size={24} /> : <SendHorizonal size={24} />}
+                         </button>
+                      </div>
+                   </footer>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center opacity-20">
+                   <Target size={96} strokeWidth={1} />
+                   <p className="text-xs font-black uppercase tracking-[0.4em] mt-8">Selecione um contato para atendimento</p>
                 </div>
               )}
            </div>
-        </div>
 
-        {/* COL 3: ÁREA DE CONVERSA PRINCIPAL (Ocupa Máximo Espaço Vertical) */}
-        <div className="flex-1 flex flex-col relative bg-[#010411] min-w-0 overflow-hidden">
-           {selectedLead ? (
-             <div className="flex flex-col h-full w-full">
-               {/* Chat Header */}
-               <div className="h-20 p-6 border-b border-white/5 flex items-center justify-between bg-[#03081a]/50 backdrop-blur-md shrink-0 z-10">
-                  <div className="flex items-center gap-4">
-                     <button onClick={() => setSelectedLead(null)} className="lg:hidden p-2 -ml-2 text-slate-500 hover:text-white"><ChevronLeft size={20} /></button>
-                     <div className="relative">
-                        <img src={selectedLead.avatar} className="w-12 h-12 rounded-2xl border border-white/10" />
-                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#010411]" />
-                     </div>
-                     <div>
-                        <h3 className="text-lg font-black text-white italic uppercase tracking-tighter leading-none">{selectedLead.name}</h3>
-                        <div className="flex items-center gap-3 mt-1.5">
-                           <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Online • Ativo</span>
-                           <span className="text-[9px] font-black text-slate-700 uppercase tracking-widest italic">{selectedLead.protocol}</span>
-                        </div>
-                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                     <HeaderAction icon={Phone} />
-                     <HeaderAction icon={Video} />
-                     <div className="h-6 w-px bg-white/5 mx-2" />
-                     <HeaderAction icon={Search} />
-                     <HeaderAction icon={MoreVertical} />
-                  </div>
-               </div>
+           {/* COL 4: SIDEBAR CRM */}
+           {selectedLead && (
+             <aside className="hidden xl:flex w-96 flex-col bg-[#020617] p-10 shrink-0 overflow-y-auto custom-scrollbar">
+                <div className="text-center mb-10">
+                   <img src={selectedLead.avatar} className="w-28 h-28 mx-auto mb-6 rounded-[2.5rem] border-2 border-white/10 shadow-2xl" />
+                   <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter">{selectedLead.name}</h3>
+                   <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest mt-2">+{selectedLead.phone}</p>
+                </div>
 
-               {/* Messages Area (Scroll Suave e Flex-1) */}
-               <div 
-                ref={scrollRef} 
-                className="flex-1 p-8 overflow-y-auto custom-scrollbar space-y-6 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] scroll-smooth"
-               >
-                  <div className="flex justify-center py-10">
-                    <div className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] italic backdrop-blur-md">
-                      Segurança de Atendimento: WF-NEURAL-SECURE
-                    </div>
-                  </div>
-
-                  {messages.map(msg => (
-                    <div key={msg.id} className={`flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300 ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'}`}>
-                       <div className={`max-w-[70%] lg:max-w-[60%] flex flex-col ${msg.sender === 'agent' ? 'items-end' : 'items-start'}`}>
-                          <div className={`p-5 rounded-[2rem] text-[14px] font-medium leading-relaxed shadow-2xl relative ${
-                            msg.sender === 'agent' 
-                              ? 'bg-orange-600 text-white border border-orange-500/50 rounded-tr-none' 
-                              : (msg.sender === 'system' 
-                                  ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20 w-full text-center italic' 
-                                  : 'bg-[#03081a] text-slate-200 border border-white/10 rounded-tl-none')
-                          }`}>
-                            {msg.content}
-                            {msg.type === 'audio' && (
-                              <div className="flex items-center gap-4 py-2 min-w-[200px]">
-                                <button className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-all"><Play size={18} fill="currentColor" /></button>
-                                <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden relative">
-                                  <div className="h-full bg-white w-1/3 shadow-[0_0_8px_#fff]" />
-                                </div>
-                                <span className="text-[10px] font-black">0:42</span>
-                              </div>
-                            )}
-                          </div>
-                          <div className={`flex items-center gap-2 mt-2 px-3 ${msg.sender === 'agent' ? 'flex-row-reverse' : 'flex-row'}`}>
-                             <span className="text-[9px] font-black text-slate-700 uppercase italic">{msg.timestamp}</span>
-                             {msg.sender === 'agent' && <CheckCheck size={14} className="text-emerald-500" />}
-                          </div>
-                       </div>
-                    </div>
-                  ))}
-
-                  {isTyping && (
-                    <div className="flex justify-start animate-pulse">
-                       <div className="bg-[#03081a] border border-white/5 p-4 rounded-[1.5rem] flex gap-1.5 items-center">
-                          <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-bounce" />
-                          <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-bounce delay-100" />
-                          <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-bounce delay-200" />
-                          <span className="text-[9px] font-black text-orange-500 uppercase tracking-widest ml-2">Cliente escrevendo...</span>
-                       </div>
-                    </div>
-                  )}
-               </div>
-
-               {/* Chat Input Core (Sticky Bottom) */}
-               <div className="p-6 lg:p-10 border-t border-white/5 bg-[#03081a]/50 backdrop-blur-md shrink-0">
-                  <div className="max-w-4xl mx-auto">
-                    <div className="flex items-center gap-4 mb-4 overflow-x-auto custom-scrollbar pb-2">
-                       <QuickReply label="/ola" onClick={() => setNewMessage('Olá! Como posso te ajudar hoje?')} />
-                       <QuickReply label="/pix" onClick={() => setNewMessage('Segue nossa chave Pix CNPJ: 00.000.000/0001-00')} />
-                       <QuickReply label="/cupom" onClick={() => setNewMessage('Use o cupom RECOVERY10 para 10% de desconto adicional.')} />
-                       <QuickReply label="/boleto" onClick={() => setNewMessage('Seu boleto já foi enviado para o e-mail cadastrado.')} />
-                    </div>
-                    
-                    <div className="flex items-end gap-4 bg-black/40 p-2 rounded-[2.5rem] border border-white/10 shadow-inner group-focus-within:border-orange-500/50 transition-all">
-                       <button onClick={() => fileInputRef.current?.click()} className="p-4 text-slate-700 hover:text-orange-500 transition-colors shrink-0"><Paperclip size={24} /></button>
-                       <input type="file" ref={fileInputRef} className="hidden" />
-                       
-                       <textarea 
-                        rows={1}
-                        value={newMessage}
-                        onChange={(e) => {
-                          setNewMessage(e.target.value);
-                          if (e.target.value.length > 0) setIsTyping(false); // In a real scenario, this would send an event
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            sendMessage();
-                          }
-                        }}
-                        placeholder="Escreva sua mensagem aqui..." 
-                        className="flex-1 bg-transparent border-none py-4 px-2 text-white text-[15px] outline-none placeholder:text-slate-800 font-medium resize-none max-h-32" 
-                       />
-                       
-                       <div className="flex items-center gap-2 p-1">
-                          <button className="p-4 text-slate-700 hover:text-orange-500 transition-colors shrink-0"><Smile size={24} /></button>
-                          <button className="p-4 text-slate-700 hover:text-emerald-500 transition-colors shrink-0"><Mic size={24} /></button>
-                          <button 
-                            onClick={() => sendMessage()}
-                            disabled={!newMessage.trim() || isSending}
-                            className={`p-5 rounded-full shadow-2xl transition-all active:scale-90 shrink-0 ${
-                              newMessage.trim() ? 'bg-orange-600 text-white shadow-orange-600/30' : 'bg-white/5 text-slate-700'
-                            }`}
-                          >
-                            {isSending ? <Loader2 size={24} className="animate-spin" /> : <SendHorizonal size={24} />}
-                          </button>
-                       </div>
-                    </div>
-                  </div>
-               </div>
-             </div>
-           ) : (
-             <div className="flex-1 flex flex-col items-center justify-center p-20 space-y-8 animate-in zoom-in duration-1000">
-                <div className="relative">
-                   <div className="absolute inset-0 bg-orange-600/20 blur-[120px] animate-pulse" />
-                   <div className="w-40 h-40 bg-[#03081a] border border-white/10 rounded-[4rem] flex items-center justify-center text-orange-500 relative z-10 shadow-[0_20px_60px_rgba(0,0,0,0.8)] border-orange-500/10">
-                      <Zap size={80} strokeWidth={1} />
+                <div className="grid grid-cols-2 gap-4 mb-10">
+                   <div className="bg-white/5 p-5 rounded-3xl border border-white/5 text-left">
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Ticket</p>
+                      <p className="text-lg font-black text-white">R$ {selectedLead.value.toFixed(2)}</p>
+                   </div>
+                   <div className="bg-white/5 p-5 rounded-3xl border border-white/5 text-left">
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Incidente</p>
+                      <p className="text-[10px] font-black text-rose-500 uppercase truncate italic">CARD_DECLINED</p>
                    </div>
                 </div>
-                <div className="text-center space-y-3">
-                   <h2 className="text-3xl font-black text-white italic uppercase tracking-tighter">WayFlow Neural Station</h2>
-                   <p className="text-[11px] text-slate-600 font-black uppercase tracking-[0.5em] max-w-sm mx-auto leading-relaxed">Pronto para processar incidentes de checkout em tempo real. Selecione um atendimento.</p>
-                </div>
-                <div className="flex gap-4">
-                  <div className="px-6 py-2 bg-white/5 border border-white/5 rounded-full text-[9px] font-black text-slate-700 uppercase tracking-widest italic">Evolution API Node: {selectedInstanceName || 'OFFLINE'}</div>
-                  <div className="px-6 py-2 bg-white/5 border border-white/5 rounded-full text-[9px] font-black text-slate-700 uppercase tracking-widest italic">Cluster: BRA-ALPHA</div>
-                </div>
-             </div>
+
+                <section className="flex-1 space-y-8">
+                   <h4 className="text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2"><History size={16} className="text-orange-500" /> Histórico</h4>
+                   <div className="space-y-6">
+                      <TimelineItem label="Checkout Abandonado" time="15m atrás" icon={Smartphone} />
+                      <TimelineItem label="Alerta Disparado" time="14m atrás" icon={AlertCircle} color="text-rose-500" />
+                   </div>
+                </section>
+
+                <button className="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[2rem] font-black text-[11px] uppercase tracking-widest transition-all flex items-center justify-center gap-3 mt-10">
+                   <CheckCircle2 size={20} /> Concluir Lead
+                </button>
+             </aside>
            )}
         </div>
-
-        {/* COL 4: CRM INTEL & DETALHES (Sidebar Direita Opcional) */}
-        {selectedLead && (
-          <div className="hidden xl:flex w-80 lg:w-96 border-l border-white/5 flex-col bg-[#03081a] shrink-0 animate-in slide-in-from-right duration-500">
-             <div className="p-10 border-b border-white/5 text-center bg-white/[0.01]">
-                <div className="relative w-28 h-28 mx-auto mb-6">
-                   <img src={selectedLead.avatar} className="w-full h-full rounded-[3rem] border-2 border-white/10 shadow-2xl object-cover" />
-                   <div className="absolute -bottom-2 -right-2 bg-emerald-500 p-2 rounded-xl border-4 border-[#03081a] text-white">
-                      <CheckCircle size={16} />
-                   </div>
-                </div>
-                <h3 className="text-xl font-black text-white italic uppercase tracking-tighter">{selectedLead.name}</h3>
-                <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mt-1 mb-8 italic">ID: {selectedLead.id.split('@')[0]}</p>
-                
-                <div className="grid grid-cols-2 gap-3 text-left">
-                   <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Ticket Valor</p>
-                      <p className="text-sm font-black text-emerald-500">R$ {selectedLead.value}</p>
-                   </div>
-                   <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Motivo Falha</p>
-                      <p className="text-[9px] font-black text-red-500 uppercase truncate">Recusa Cartão</p>
-                   </div>
-                </div>
-             </div>
-             
-             <div className="flex-1 overflow-y-auto custom-scrollbar p-8 space-y-10">
-                <section>
-                   <div className="flex items-center justify-between mb-6">
-                      <h4 className="text-[10px] font-black text-white uppercase tracking-[0.2em] flex items-center gap-2"><Clock size={14} className="text-orange-500" /> Timeline Eventos</h4>
-                      <span className="text-[8px] font-black text-slate-700 uppercase">Ver Tudo</span>
-                   </div>
-                   <div className="space-y-4">
-                      <HistoryItem label="Check-in WayFlow" time="14:20" icon={Check} />
-                      <HistoryItem label="Falha de Pagamento" time="14:21" icon={AlertTriangle} color="text-red-500" />
-                      <HistoryItem label="Atendimento Iniciado" time="14:22" icon={Hash} />
-                   </div>
-                </section>
-
-                <section>
-                   <div className="flex justify-between items-center mb-6">
-                      <h4 className="text-[10px] font-black text-white uppercase tracking-[0.2em] flex items-center gap-2"><StickyNote size={14} className="text-orange-500" /> Notas Internas</h4>
-                      <button className="text-[9px] font-black text-orange-500 uppercase tracking-widest hover:underline">+ Add</button>
-                   </div>
-                   <div className="space-y-4">
-                      <div className="p-5 bg-black/40 border border-dashed border-white/10 rounded-2xl text-[11px] text-slate-400 font-medium leading-relaxed italic group hover:border-orange-500/50 transition-all cursor-text">
-                         "Cliente tentou passar o cartão 3 vezes sem sucesso. Proposta de boleto com desconto já em negociação."
-                      </div>
-                      <div className="p-5 bg-black/40 border border-dashed border-white/10 rounded-2xl text-[11px] text-slate-400 font-medium leading-relaxed italic group hover:border-orange-500/50 transition-all cursor-text">
-                         "Agendado retorno para amanhã às 10h."
-                      </div>
-                   </div>
-                </section>
-             </div>
-
-             <div className="p-8 border-t border-white/5 bg-white/[0.01]">
-                <button className="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 shadow-[0_10px_30px_rgba(16,185,129,0.3)] group">
-                   <CheckCircle2 size={18} className="group-hover:scale-125 transition-transform" /> Concluir Atendimento
-                </button>
-                <p className="text-center text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] mt-6">SLA Ativo: 00:12:45</p>
-             </div>
-          </div>
-        )}
       </div>
     </Layout>
   );
 };
 
-const FilterBtn: React.FC<{ active: boolean, onClick: () => void, label: string, icon: any, color?: string }> = ({ active, onClick, label, icon: Icon, color = "text-white" }) => (
-  <button 
-    onClick={onClick}
-    className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl transition-all group ${active ? 'bg-orange-600/10 border border-orange-500/20 shadow-lg' : 'hover:bg-white/[0.02] border border-transparent'}`}
-  >
-     <Icon size={18} className={active ? color : 'text-slate-700'} />
-     <span className={`text-[10px] font-black uppercase tracking-[0.2em] hidden lg:block ${active ? 'text-white' : 'text-slate-600'}`}>{label}</span>
+const FilterItem: React.FC<{ active: boolean, onClick: () => void, icon: any, label: string, color?: string }> = ({ active, onClick, icon: Icon, label, color = "text-white" }) => (
+  <button onClick={onClick} className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all ${active ? 'bg-orange-600/10 border border-orange-500/20 shadow-lg' : 'hover:bg-white/[0.02] border border-transparent'}`}>
+     <Icon size={16} className={active ? color : 'text-slate-800'} />
+     <span className={`text-[10px] font-black uppercase tracking-widest ${active ? 'text-white' : 'text-slate-600'}`}>{label}</span>
   </button>
 );
 
-const HistoryItem: React.FC<{ label: string, time: string, icon: any, color?: string }> = ({ label, time, icon: Icon, color = "text-emerald-500" }) => (
-  <div className="flex items-center gap-4 group">
-     <div className={`w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center ${color} border border-white/5 transition-transform group-hover:scale-110`}>
+const TimelineItem: React.FC<{ label: string, time: string, icon: any, color?: string }> = ({ label, time, icon: Icon, color = "text-emerald-500" }) => (
+  <div className="flex items-center gap-4">
+     <div className={`w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center ${color} border border-white/5`}>
         <Icon size={14} />
      </div>
-     <div className="flex-1">
-        <p className="text-[11px] font-black text-slate-400 uppercase tracking-tight leading-none mb-1 group-hover:text-white transition-colors">{label}</p>
-        <p className="text-[9px] text-slate-700 font-bold">{time}</p>
+     <div className="min-w-0">
+        <p className="text-[11px] font-black text-slate-400 uppercase tracking-tight truncate">{label}</p>
+        <p className="text-[9px] text-slate-800 font-bold">{time}</p>
      </div>
   </div>
-);
-
-const QuickReply: React.FC<{ label: string, onClick: () => void }> = ({ label, onClick }) => (
-  <button 
-    onClick={onClick}
-    className="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-[10px] font-black text-slate-400 hover:text-orange-500 uppercase tracking-widest whitespace-nowrap transition-all active:scale-95"
-  >
-    {label}
-  </button>
-);
-
-const HeaderAction: React.FC<{ icon: any }> = ({ icon: Icon }) => (
-  <button className="p-3 bg-white/5 text-slate-500 hover:text-white hover:bg-white/10 rounded-xl border border-white/5 transition-all active:scale-90">
-    <Icon size={18} />
-  </button>
 );
 
 export default ChatManager;
